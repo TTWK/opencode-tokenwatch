@@ -1,0 +1,23 @@
+{
+  "name": "opencode-tokenwatch",
+  "version": "0.1.0",
+  "description": "Token usage statistics for opencode",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["opencode", "plugin", "tokens", "usage", "stats"],
+  "license": "MIT",
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
