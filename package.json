@@ -5,15 +5,30 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "exports": {
+    ".": "./dist/index.js",
+    "./tui": "./dist/tui.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["opencode", "plugin", "tokens", "usage", "stats"],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "tokens",
+    "usage",
+    "stats"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@opencode-ai/plugin": "latest",
+    "@opentui/core": "^0.2.9",
+    "@opentui/keymap": "^0.2.9",
+    "@opentui/solid": "^0.2.9",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
   },
