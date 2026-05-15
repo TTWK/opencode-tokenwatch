@@ -95,24 +95,33 @@ GROUP BY model ORDER BY total_tokens DESC
     }
   }
 
-  # Compute max column widths (minimums match header text length)
-  $wModel = [Math]::Max((Max-Width $items.Model), 5)
-  $wReq   = [Math]::Max((Max-Width $items.Req), 3)
-  $wSes   = [Math]::Max((Max-Width $items.Ses), 3)
-  $wTotal = [Math]::Max((Max-Width $items.Total), 5)
-  $wCache = [Math]::Max((Max-Width $items.Cache), 5)
-  $wCost  = [Math]::Max((Max-Width $items.Cost), 4)
-
-  # In/Out pair width
-  $inoutStrs = foreach ($it in $items) { "$($it.In)/$($it.Out)" }
-  $wInOut = [Math]::Max((Max-Width $inoutStrs), 6)
-
   # TOTAL row formatted values
   $tReq = 0; $tSes = 0; $tTok = 0; $tIn = 0; $tOut = 0; $tCache = 0; $tCost = 0.0
   foreach ($it in $items) {
     $tReq += $it.R_req; $tSes += $it.R_ses; $tTok += $it.R_total
     $tIn += $it.R_in; $tOut += $it.R_out; $tCache += $it.R_cache; $tCost += $it.R_cost
   }
+
+  $sTReq   = "$tReq"
+  $sTSes   = "$tSes"
+  $sTTok   = Format-Tokens $tTok
+  $sTIn    = Format-Tokens $tIn
+  $sTOut   = Format-Tokens $tOut
+  $sTInOut = "$sTIn/$sTOut"
+  $sTCache = Format-Tokens $tCache
+  $sTCost  = Format-Cost $tCost
+
+  # Compute max column widths (minimums match header text length, and include TOTAL row)
+  $wModel = [Math]::Max((Max-Width $items.Model), 5)
+  $wReq   = [Math]::Max([Math]::Max((Max-Width $items.Req), 3), $sTReq.Length)
+  $wSes   = [Math]::Max([Math]::Max((Max-Width $items.Ses), 3), $sTSes.Length)
+  $wTotal = [Math]::Max([Math]::Max((Max-Width $items.Total), 5), $sTTok.Length)
+  $wCache = [Math]::Max([Math]::Max((Max-Width $items.Cache), 5), $sTCache.Length)
+  $wCost  = [Math]::Max([Math]::Max((Max-Width $items.Cost), 4), $sTCost.Length)
+
+  # In/Out pair width
+  $inoutStrs = foreach ($it in $items) { "$($it.In)/$($it.Out)" }
+  $wInOut = [Math]::Max([Math]::Max((Max-Width $inoutStrs), 6), $sTInOut.Length)
 
   # Border components
   $top = "┌$('─' * ($wModel + 2))┬$('─' * ($wReq + 2))┬$('─' * ($wSes + 2))┬$('─' * ($wTotal + 2))┬$('─' * ($wInOut + 2))┬$('─' * ($wCache + 2))┬$('─' * ($wCost + 2))┐"
@@ -129,7 +138,7 @@ GROUP BY model ORDER BY total_tokens DESC
   }
 
   Write-Output $mid
-  Write-Output ($fmt -f "TOTAL", $tReq, $tSes, (Format-Tokens $tTok), "$(Format-Tokens $tIn)/$(Format-Tokens $tOut)", (Format-Tokens $tCache), (Format-Cost $tCost))
+  Write-Output ($fmt -f "TOTAL", $sTReq, $sTSes, $sTTok, $sTInOut, $sTCache, $sTCost)
   Write-Output $bot
   Write-Output ""
 }
@@ -185,6 +194,22 @@ GROUP BY day ORDER BY day DESC LIMIT $Limit
     $tOut += $it.R_out; $tCache += $it.R_cache; $tCost += $it.R_cost
   }
 
+  $sTReq   = "$tReq"
+  $sTTok   = Format-Tokens $tTok
+  $sTIn    = Format-Tokens $tIn
+  $sTOut   = Format-Tokens $tOut
+  $sTCache = Format-Tokens $tCache
+  $sTCost  = Format-Cost $tCost
+
+  # Column widths
+  $wDay   = [Math]::Max((Max-Width $items.Day), 5)
+  $wReq   = [Math]::Max([Math]::Max((Max-Width $items.Req), 3), $sTReq.Length)
+  $wTotal = [Math]::Max([Math]::Max((Max-Width $items.Total), 5), $sTTok.Length)
+  $wIn    = [Math]::Max([Math]::Max((Max-Width $items.In), 2), $sTIn.Length)
+  $wOut   = [Math]::Max([Math]::Max((Max-Width $items.Out), 3), $sTOut.Length)
+  $wCache = [Math]::Max([Math]::Max((Max-Width $items.Cache), 5), $sTCache.Length)
+  $wCost  = [Math]::Max([Math]::Max((Max-Width $items.Cost), 4), $sTCost.Length)
+
   # Border components
   $top = "┌$('─' * ($wDay + 2))┬$('─' * ($wReq + 2))┬$('─' * ($wTotal + 2))┬$('─' * ($wIn + 2))┬$('─' * ($wOut + 2))┬$('─' * ($wCache + 2))┬$('─' * ($wCost + 2))┐"
   $mid = "├$('─' * ($wDay + 2))┼$('─' * ($wReq + 2))┼$('─' * ($wTotal + 2))┼$('─' * ($wIn + 2))┼$('─' * ($wOut + 2))┼$('─' * ($wCache + 2))┼$('─' * ($wCost + 2))┤"
@@ -200,7 +225,7 @@ GROUP BY day ORDER BY day DESC LIMIT $Limit
   }
 
   Write-Output $mid
-  Write-Output ($fmt -f "TOTAL", $tReq, (Format-Tokens $tTok), (Format-Tokens $tIn), (Format-Tokens $tOut), (Format-Tokens $tCache), (Format-Cost $tCost))
+  Write-Output ($fmt -f "TOTAL", $sTReq, $sTTok, $sTIn, $sTOut, $sTCache, $sTCost)
   Write-Output $bot
 }
 
