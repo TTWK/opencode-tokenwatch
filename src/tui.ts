@@ -37,7 +37,7 @@ const plugin: TuiPluginModule = {
 
     api.slots.register({
       slots: {
-        sidebar_footer: (_ctx, { session_id }): any => {
+        sidebar_content: (_ctx, { session_id }): any => {
           const messages = api.state.session.messages(session_id)
           const models = new Map<string, Acc>()
 
