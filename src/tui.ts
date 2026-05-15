@@ -71,6 +71,7 @@ const plugin: TuiPluginModule = {
 
           if (models.size === 0) {
             const noData = createElement("text")
+            setProp(noData, "color", _ctx.theme.current.textMuted)
             insertNode(noData, createTextNode("  No data yet"))
             insertNode(container, noData)
             return container
@@ -80,10 +81,12 @@ const plugin: TuiPluginModule = {
             const modelName = model.includes("/") ? model.split("/").pop() ?? model : model
             
             const mText = createElement("text")
+            setProp(mText, "color", _ctx.theme.current.textMuted)
             insertNode(mText, createTextNode(`  ${modelName}: ${fmt(s.total)}`))
             insertNode(container, mText)
 
             const dText = createElement("text")
+            setProp(dText, "color", _ctx.theme.current.textMuted)
             insertNode(dText, createTextNode(`    In:${fmt(s.input)} Out:${fmt(s.output)} Cache:${fmt(s.cacheRead)}`))
             insertNode(container, dText)
           }
