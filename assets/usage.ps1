@@ -4,6 +4,9 @@ param(
   [string]$Format = "table"
 )
 
+Write-Output "DEBUG: `$Mode is '$Mode'"
+Write-Output "DEBUG: `$args is '$args'"
+
 function Format-Tokens($n) {
   if ($n -ge 1000000) { return "{0:N1}M" -f ($n / 1000000) }
   if ($n -ge 1000)    { return "{0:N1}K" -f ($n / 1000) }

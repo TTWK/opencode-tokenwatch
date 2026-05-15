@@ -9,9 +9,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/solid"
+    "isolatedModules": true
   },
   "include": ["src"]
 }
