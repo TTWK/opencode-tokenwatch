@@ -1,4 +1,5 @@
 import type { TuiPluginModule } from "@opencode-ai/plugin/tui"
+import { createElement, createTextNode, insertNode, setProp } from "@opentui/solid"
 
 const plugin: TuiPluginModule = {
   id: "opencode-tokenwatch",
@@ -7,12 +8,6 @@ const plugin: TuiPluginModule = {
       if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M"
       if (n >= 1_000) return (n / 1_000).toFixed(1) + "K"
       return String(n)
-    }
-
-    const fmtCost = (n: number): string => {
-      if (n === 0) return "$0"
-      if (n < 0.01) return "$" + n.toFixed(4)
-      return "$" + n.toFixed(2)
     }
 
     type Acc = {
@@ -32,18 +27,17 @@ const plugin: TuiPluginModule = {
       const short = model.includes("/") ? model.split("/").pop() ?? model : model
       const input = (info.tokens.input as number) ?? 0
       const output = (info.tokens.output as number) ?? 0
-      const cost = (info.cost as number) ?? 0
 
       api.ui.toast({
         title: "TokenWatch",
-        message: `${short}  \u2191${fmt(input)} \u2193${fmt(output)}  ${fmtCost(cost)}`,
+        message: `${short}  \u2191${fmt(input)} \u2193${fmt(output)}`,
         duration: 3000,
       })
     })
 
     api.slots.register({
       slots: {
-        sidebar_content: (_ctx, { session_id }) => {
+        sidebar_footer: (_ctx, { session_id }): any => {
           const messages = api.state.session.messages(session_id)
           const models = new Map<string, Acc>()
 
@@ -66,34 +60,35 @@ const plugin: TuiPluginModule = {
             models.set(model, m)
           }
 
+          const container = createElement("box")
+          setProp(container, "flexDirection", "column")
+          setProp(container, "marginTop", 1)
+
+          const headerText = createElement("text")
+          setProp(headerText, "color", _ctx.theme.current.primary)
+          insertNode(headerText, createTextNode("TokenWatch"))
+          insertNode(container, headerText)
+
           if (models.size === 0) {
-            return "TokenWatch\nNo data yet"
+            const noData = createElement("text")
+            insertNode(noData, createTextNode("  No data yet"))
+            insertNode(container, noData)
+            return container
           }
 
-          const lines: string[] = ["TokenWatch"]
           for (const [model, s] of models) {
-            const short = model.length > 18 ? model.slice(0, 16) + ".." : model
-            lines.push(
-              `  ${short.padEnd(18)} ${String(s.requests).padStart(2)}r ${fmt(s.total).padStart(7)} ${fmtCost(s.cost).padStart(6)}`
-            )
+            const modelName = model.includes("/") ? model.split("/").pop() ?? model : model
+            
+            const mText = createElement("text")
+            insertNode(mText, createTextNode(`  ${modelName}: ${fmt(s.total)}`))
+            insertNode(container, mText)
+
+            const dText = createElement("text")
+            insertNode(dText, createTextNode(`    In:${fmt(s.input)} Out:${fmt(s.output)} Cache:${fmt(s.cacheRead)}`))
+            insertNode(container, dText)
           }
 
-          const total = { requests: 0, total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cost: 0 }
-          for (const s of models.values()) {
-            total.requests += s.requests
-            total.total += s.total
-            total.input += s.input
-            total.output += s.output
-            total.cacheRead += s.cacheRead
-            total.cost += s.cost
-          }
-
-          lines.push(`  ${"\u2500".repeat(34)}`)
-          lines.push(
-            `  ${"Total".padEnd(18)} ${String(total.requests).padStart(2)}r ${fmt(total.total).padStart(7)} ${fmtCost(total.cost).padStart(6)}`
-          )
-
-          return lines.join("\n")
+          return container
         },
       },
     })
