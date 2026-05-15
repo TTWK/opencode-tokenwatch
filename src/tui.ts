@@ -36,6 +36,7 @@ const plugin: TuiPluginModule = {
     })
 
     api.slots.register({
+      order: 100,
       slots: {
         sidebar_content: (_ctx, { session_id }): any => {
           const messages = api.state.session.messages(session_id)
@@ -65,13 +66,13 @@ const plugin: TuiPluginModule = {
           setProp(container, "marginTop", 1)
 
           const headerText = createElement("text")
-          setProp(headerText, "color", _ctx.theme.current.primary)
+          setProp(headerText, "fg", _ctx.theme.current.primary)
           insertNode(headerText, createTextNode("TokenWatch"))
           insertNode(container, headerText)
 
           if (models.size === 0) {
             const noData = createElement("text")
-            setProp(noData, "color", _ctx.theme.current.textMuted)
+            setProp(noData, "fg", _ctx.theme.current.textMuted)
             insertNode(noData, createTextNode("  No data yet"))
             insertNode(container, noData)
             return container
@@ -81,12 +82,12 @@ const plugin: TuiPluginModule = {
             const modelName = model.includes("/") ? model.split("/").pop() ?? model : model
             
             const mText = createElement("text")
-            setProp(mText, "color", _ctx.theme.current.textMuted)
+            setProp(mText, "fg", _ctx.theme.current.textMuted)
             insertNode(mText, createTextNode(`  ${modelName}: ${fmt(s.total)}`))
             insertNode(container, mText)
 
             const dText = createElement("text")
-            setProp(dText, "color", _ctx.theme.current.textMuted)
+            setProp(dText, "fg", _ctx.theme.current.textMuted)
             insertNode(dText, createTextNode(`    In:${fmt(s.input)} Out:${fmt(s.output)} Cache:${fmt(s.cacheRead)}`))
             insertNode(container, dText)
           }
