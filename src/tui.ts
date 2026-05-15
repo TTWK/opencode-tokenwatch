@@ -31,53 +31,32 @@ const plugin: TuiPluginModule = {
     api.command?.register(() => [{
       title: "TokenWatch: Usage Stats",
       value: "tokenwatch-usage",
-      description: "Show global token usage statistics",
+      description: "Show global token usage statistics in chat",
       slash: {
         name: "usage",
       },
-      onSelect: async (dialog) => {
-        dialog?.setSize("xlarge")
-        dialog?.replace(() => {
-          const container = createElement("box")
-          setProp(container, "padding", 2)
-          setProp(container, "flexDirection", "column")
-          
-          const titleBox = createElement("box")
-          setProp(titleBox, "marginBottom", 1)
-          const text = createElement("text")
-          setProp(text, "fg", api.theme.current.primary)
-          insertNode(text, createTextNode("Loading token usage statistics..."))
-          insertNode(titleBox, text)
-          insertNode(container, titleBox)
-          
-          const scriptPath = path.join(__dirname, "../assets/usage.ps1")
-          exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, { env: process.env }, (error, stdout, stderr) => {
-             dialog?.replace(() => {
-               const root = createElement("box")
-               setProp(root, "width", "100%")
-               setProp(root, "height", "100%")
-               setProp(root, "padding", 1)
-               
-               const scrollbox = createElement("scrollbox")
-               setProp(scrollbox, "width", "100%")
-               setProp(scrollbox, "height", "100%")
-               
-               const resultText = createElement("text")
-               if (error || stderr) {
-                 setProp(resultText, "fg", api.theme.current.error)
-                 insertNode(resultText, createTextNode(String(error) + "\n" + stderr))
-               } else {
-                 setProp(resultText, "fg", api.theme.current.text)
-                 insertNode(resultText, createTextNode(stdout))
-               }
-               
-               insertNode(scrollbox, resultText)
-               insertNode(root, scrollbox)
-               return root
-             })
+      onSelect: async () => {
+        try {
+          const scriptPath = path.resolve(__dirname, "../assets/usage.ps1")
+          const cmd = `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '${scriptPath}'"`
+          const { stdout } = await execAsync(cmd, { env: process.env })
+
+          if (!stdout) {
+            api.ui.toast({ variant: "warning", message: "No statistics data received." })
+            return
+          }
+
+          await api.client.tui.clearPrompt()
+          await api.client.tui.appendPrompt({
+            text: `Display the following token usage statistics as-is with no additional text, commentary, or formatting:\n\n\`\`\`\n${stdout}\n\`\`\``,
           })
-          return container
-        })
+          await api.client.tui.submitPrompt()
+        } catch (error: any) {
+          api.ui.toast({
+            variant: "error",
+            message: `TokenWatch: ${String(error?.message ?? error).substring(0, 100)}`,
+          })
+        }
       }
     }])
 
