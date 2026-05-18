@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 .opencode/
+tokenwatch-*.json
+tokenwatch-*.csv
