@@ -32,7 +32,8 @@ function ReportScreen(props: { api: TuiApi; params: ReportRouteParams | undefine
 
   // Add key handler to close report
   useKeyHandler((event) => {
-    if (event.name === "escape" || event.name === "q") {
+    if (event.name === "escape" || event.name === "esc" || event.name === "q") {
+      event.stopPropagation()
       if (lastSessionId) {
         props.api.route.navigate("session", { sessionID: lastSessionId })
       } else {
@@ -333,6 +334,28 @@ const plugin: TuiPluginModule = {
       name: "tokenwatch-report",
       render: ({ params }) => ReportScreen({ api, params: params as ReportRouteParams | undefined }),
     }])
+
+    api.command?.register(() => {
+      const current = api.route.current
+      const isReport = current && "name" in current && current.name === "tokenwatch-report"
+      if (!isReport) return []
+      
+      const lastSessionId = (current.params as any)?.lastSessionId
+
+      return [{
+        title: "TokenWatch: Close Report",
+        value: "tokenwatch-close-report",
+        description: "Return to chat",
+        keybind: "escape,q",
+        onSelect: () => {
+          if (lastSessionId) {
+            api.route.navigate("session", { sessionID: lastSessionId })
+          } else {
+            api.route.navigate("home")
+          }
+        },
+      }]
+    })
 
     api.command?.register(() => [{
       title: "TokenWatch: Usage Stats",
