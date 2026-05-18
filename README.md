@@ -1,97 +1,102 @@
 # opencode-tokenwatch
 
-Token usage statistics for opencode.
+Token usage analytics plugin for OpenCode.
 
-Query opencode's SQLite database to display per-model and per-day token usage,
-cost, and cache metrics directly in your opencode session via the `/usage` command.
+It adds a live sidebar panel for the current session and a `/usage` slash command
+that reads your local OpenCode history from SQLite, aggregates token usage by
+model, provider, date, and session, and supports export to JSON or CSV.
 
 ## Features
 
-- **`/usage` command** — Current session, per-model breakdown, daily breakdown
-- **Direct SQLite queries** — Uses `opencode db` for fast aggregation
-- **Rich breakdown** — total / input / output / reasoning / cache tokens
-- **Server plugin** — Lightweight event hook for token tracking
+- Live sidebar updates while the assistant replies
+- Current-session aggregation across every model used in the conversation
+- `/usage` report for local history with model, provider, date, and session views
+- Export full reports to `JSON`
+- Export grouped tables to `CSV`
+- Uses `opencode db ... --format json` directly, so it works from local records
 
-## Installation
+## Install
 
-### 1. Install the npm package
+Add the package to OpenCode's plugin list.
+
+Install the package first:
 
 ```sh
-cd ~/.config/opencode
 npm install opencode-tokenwatch
 ```
 
-### 2. Deploy the helper script
+`opencode.json` or `opencode.jsonc`
 
-```powershell
-# Create the temp directory
-New-Item -ItemType Directory -Path "$env:TEMP\opencode" -Force
-
-# Copy the script from the package
-Copy-Item node_modules/opencode-tokenwatch/scripts/opencode-usage.ps1 "$env:TEMP\opencode\"
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-tokenwatch"]
+}
 ```
 
-### 3. Add the custom command
+`tui.json` or `tui.jsonc`
 
-Create `~/.config/opencode/commands/usage.md`:
-
-```markdown
----
-description: Show token usage statistics for opencode sessions
----
-
-!`powershell -File "$env:TEMP\opencode\opencode-usage.ps1" -Mode current`
-
-!`powershell -File "$env:TEMP\opencode\opencode-usage.ps1" -Mode model`
-
-!`powershell -File "$env:TEMP\opencode\opencode-usage.ps1" -Mode daily`
+```json
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["opencode-tokenwatch"]
+}
 ```
+
+If you are preparing for npm publishing, this package is already configured to
+publish public artifacts from `dist/`.
 
 ## Usage
 
-In any opencode session, type `/usage`. Output example:
+In OpenCode TUI:
 
-```
-═══ Current Session ═══
-  Model:    deepseek-v4-flash-free
-  Requests: 150
-  Tokens:   13.8M  (in:96.5K  out:34.5K  reasoning:40.6K  cache:13.6M)
-  Cost:     $0.00
+1. Open the right sidebar to see live token totals for the current session.
+2. Run `/usage`.
+3. Choose:
+   - `View report`
+   - `Export JSON`
+   - `Export CSV`
+4. Pick a time range and optional provider/model filters.
 
-═══ Model Breakdown ═══
-  mimo-v2-pro-free                523 req   12 ses  tot:  48.1M  in:   1.9M  out: 185.9K  cache:  46.0M  $0.00
-  deepseek-v4-flash-free          245 req    4 ses  tot:  20.3M  in: 262.7K  out:  77.5K  cache:  19.9M  $0.00
-  ...
-  ─── TOTAL ───                  1152 req   48 ses  tot:  86.0M  in:  15.0M  out: 476.5K  cache:  70.4M  $2.03
+Exports are written to the current working directory:
 
-═══ Daily Breakdown ═══
-  2026-05-13    245 req  tot:  20.3M  in: 262.7K  out:  77.5K  cache:  19.9M  $0.00
-  ...
-  ─── TOTAL ───  536 req  tot:  34.2M  in:   8.0M  out: 211.8K  cache:  26.0M  $2.03
-```
+- `tokenwatch-usage-report.json`
+- `tokenwatch-models.csv`
+- `tokenwatch-providers.csv`
+- `tokenwatch-daily.csv`
+- `tokenwatch-sessions.csv`
 
-## Project Structure
+## Report Dimensions
 
-```
-opencode-tokenwatch/
-├── package.json           # npm package, server plugin entry
-├── tsconfig.json
-├── src/
-│   ├── index.ts           # Server plugin (event hook)
-│   ├── queries.ts         # SQL aggregation queries
-│   └── formatter.ts       # Token/cost formatters + types
-├── scripts/
-│   └── opencode-usage.ps1 # PowerShell script for /usage
-├── docs/superpowers/      # Design spec and plan
-├── LICENSE
-└── README.md
-```
+- Model
+- Provider
+- Day
+- Session
+- Current session summary
 
 ## Requirements
 
-- opencode v1.14+
+- OpenCode CLI with `opencode db`
 - Node.js 18+
-- Windows (PowerShell for the helper script; adapt for Linux/macOS)
+
+## Build
+
+```sh
+npm install
+npm run build
+```
+
+## Publish Prep
+
+Before publishing to npm, run:
+
+```sh
+npm run release:check
+```
+
+This builds the package and runs `npm pack --dry-run` with an isolated temp npm
+cache, which is especially helpful on Windows when the default cache directory is
+locked by another process.
 
 ## License
 

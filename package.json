@@ -1,29 +1,54 @@
 {
   "name": "opencode-tokenwatch",
   "version": "0.1.0",
-  "description": "Token usage statistics for opencode",
+  "description": "Token usage analytics plugin for OpenCode with live sidebar stats and /usage reports",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./tui": "./dist/tui.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
+    "release:check": "node ./scripts/publish-check.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
     "opencode",
     "plugin",
+    "opencode-plugin",
     "tokens",
     "usage",
-    "stats"
+    "stats",
+    "sqlite",
+    "analytics",
+    "tui"
   ],
   "license": "MIT",
+  "author": "TTWK",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TTWK/opencode-tokenwatch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TTWK/opencode-tokenwatch/issues"
+  },
+  "homepage": "https://github.com/TTWK/opencode-tokenwatch#readme",
   "devDependencies": {
     "@opencode-ai/plugin": "latest",
     "@opentui/core": "^0.2.9",
