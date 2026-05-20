@@ -1,12 +1,16 @@
-# opencode-tokenwatch Design Spec
+# [DEPRECATED] opencode-tokenwatch Design Spec (v0.1.0)
 
-## Overview
+> **This document is deprecated.** The original v0.1.0 design has been superseded
+> by the v2 refactoring. See `2026-05-20-tokenwatch-v2-design.zh.md` (Chinese)
+> or `2026-05-20-tokenwatch-v2-design.en.md` (English) for the current design.
+
+## Overview (Historical)
 
 An opencode plugin that provides token usage statistics via the `/usage`
 custom command. Uses direct SQLite queries (`opencode db`) for fast
 aggregation instead of SDK client crawling. Works in both CLI and TUI modes.
 
-## Architecture
+## Architecture (Historical)
 
 ```
 ┌─ opencode session ─────────────────────────────────────┐

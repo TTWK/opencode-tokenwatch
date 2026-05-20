@@ -316,6 +316,7 @@ const plugin: TuiPluginModule = {
   tui: async (api) => {
     let lastActiveSessionId: string | undefined
     const [sidebarRevision, setSidebarRevision] = createSignal(0)
+    const [isCollapsed, setIsCollapsed] = createSignal(false)
 
     const refreshSidebar = (sessionID?: string) => {
       if (!sessionID || sessionID === lastActiveSessionId) {
@@ -435,10 +436,20 @@ const plugin: TuiPluginModule = {
           setProp(container, "flexDirection", "column")
           setProp(container, "marginTop", 1)
 
+          const headerRow = createElement("box")
+          setProp(headerRow, "focusable", true)
+          setProp(headerRow, "onMouseDown", () => setIsCollapsed(!isCollapsed()))
+          setProp(headerRow, "onKeyDown", (key: any) => {
+            if (key.name === "enter" || key.name === "return" || key.name === " ") {
+              setIsCollapsed(!isCollapsed())
+            }
+          })
+
           const headerText = createElement("text")
           setProp(headerText, "fg", _ctx.theme.current.primary)
-          insertNode(headerText, createTextNode("TokenWatch"))
-          insertNode(container, headerText)
+          insertNode(headerText, createTextNode((isCollapsed() ? "\u25B6 " : "\u25BC ") + "TokenWatch"))
+          insertNode(headerRow, headerText)
+          insertNode(container, headerRow)
 
           if (stats.length === 0) {
             const noData = createElement("text")
@@ -448,38 +459,40 @@ const plugin: TuiPluginModule = {
             return container
           }
 
-          for (const item of stats) {
-            const main = createElement("text")
-            setProp(main, "fg", _ctx.theme.current.primary)
-            insertNode(main, createTextNode(`  ${modelLabel(item.provider, item.model)}`))
-            insertNode(container, main)
+          if (!isCollapsed()) {
+            for (const item of stats) {
+              const main = createElement("text")
+              setProp(main, "fg", _ctx.theme.current.primary)
+              insertNode(main, createTextNode(`  ${modelLabel(item.provider, item.model)}`))
+              insertNode(container, main)
 
-            const detail = createElement("text")
-            setProp(detail, "fg", _ctx.theme.current.textMuted)
-            insertNode(detail, createTextNode(`    ${formatTokens(item.total)} (in:${formatTokens(item.input)} out:${formatTokens(item.output)})`))
-            insertNode(container, detail)
+              const detail = createElement("text")
+              setProp(detail, "fg", _ctx.theme.current.textMuted)
+              insertNode(detail, createTextNode(`    ${formatTokens(item.total)} (in:${formatTokens(item.input)} out:${formatTokens(item.output)})`))
+              insertNode(container, detail)
 
-            const subDetail = createElement("text")
-            setProp(subDetail, "fg", _ctx.theme.current.textMuted)
-            insertNode(subDetail, createTextNode(`    req:${item.requests} cache:${formatTokens(item.cacheRead)}`))
-            insertNode(container, subDetail)
-          }
+              const subDetail = createElement("text")
+              setProp(subDetail, "fg", _ctx.theme.current.textMuted)
+              insertNode(subDetail, createTextNode(`    req:${item.requests} cache:${formatTokens(item.cacheRead)}`))
+              insertNode(container, subDetail)
+            }
 
-          if (stats.length > 1) {
-            const divider = createElement("text")
-            setProp(divider, "fg", _ctx.theme.current.textMuted)
-            insertNode(divider, createTextNode("  ───────────────────────────────"))
-            insertNode(container, divider)
+            if (stats.length > 1) {
+              const divider = createElement("text")
+              setProp(divider, "fg", _ctx.theme.current.textMuted)
+              insertNode(divider, createTextNode("  ───────────────────────────────"))
+              insertNode(container, divider)
 
-            const totalLine = createElement("text")
-            setProp(totalLine, "fg", _ctx.theme.current.textMuted)
-            insertNode(totalLine, createTextNode(`  Total: ${formatTokens(total.totalTokens)}  req:${total.requestCount}`))
-            insertNode(container, totalLine)
+              const totalLine = createElement("text")
+              setProp(totalLine, "fg", _ctx.theme.current.textMuted)
+              insertNode(totalLine, createTextNode(`  Total: ${formatTokens(total.totalTokens)}  req:${total.requestCount}`))
+              insertNode(container, totalLine)
 
-            const costLine = createElement("text")
-            setProp(costLine, "fg", _ctx.theme.current.textMuted)
-            insertNode(costLine, createTextNode(`    in:${formatTokens(total.inputTokens)} out:${formatTokens(total.outputTokens)} cache:${formatTokens(total.cacheRead)}`))
-            insertNode(container, costLine)
+              const costLine = createElement("text")
+              setProp(costLine, "fg", _ctx.theme.current.textMuted)
+              insertNode(costLine, createTextNode(`    in:${formatTokens(total.inputTokens)} out:${formatTokens(total.outputTokens)} cache:${formatTokens(total.cacheRead)}`))
+              insertNode(container, costLine)
+            }
           }
 
           return container
