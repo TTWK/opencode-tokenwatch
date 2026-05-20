@@ -4,3 +4,4 @@ dist/
 .opencode/
 tokenwatch-*.json
 tokenwatch-*.csv
+.worktrees/
