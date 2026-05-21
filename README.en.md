@@ -9,13 +9,13 @@ Adds a live sidebar panel and `/usage` slash command that reads your local OpenC
 ## Features
 
 - **Sidebar panel** — Session-level and per-model real-time statistics (input/output/cache read)
-- **Cache hit rate visualization** — Progress bar with color thresholds (green/yellow/red), trend indicator (↑/↓)
+- **Cache hit rate visualization** — Inline progress bar in model row with color thresholds and trend indicator (↑/↓)
 - **Performance metrics** — Time to first token (TTFT), tokens per second (TPS), end-to-end latency
 - **Token distribution** — Breakdown by role (system/user/Agent instruction/Tool call/Tool result)
 - **Model pricing display** — Input/cache read unit prices for the current model
 - **`/usage` command** — Historical reports grouped by model, provider, date, and session
 - **`/usage-settings` command** — Configure sidebar display options
-- **Multi-level collapse** — Panel, models, and sub-blocks (Cache/Performance/Pricing) collapsible independently
+- **Multi-level collapse** — Panel, models, and sub-blocks (Performance/Pricing) collapsible independently
 - **Collapse state persistence** — Restored after restart
 - **Width adaptive** — Automatically adjusts layout when sidebar width changes
 - **JSONL logging** — Per-request details persisted to `~/.opencode/tokenwatch.jsonl`
@@ -48,7 +48,6 @@ Customize sidebar display and language via `pluginConfig` (optional):
   "pluginConfig": {
     "opencode-tokenwatch": {
       "sidebar": {
-        "showCache": true,
         "showPerformance": true,
         "showPricing": false,
         "showTokenDistribution": false,
@@ -62,7 +61,6 @@ Customize sidebar display and language via `pluginConfig` (optional):
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sidebar.showCache` | boolean | `true` | Show cache hit rate block |
 | `sidebar.showPerformance` | boolean | `true` | Show performance metrics block |
 | `sidebar.showPricing` | boolean | `true` | Show model pricing block |
 | `sidebar.showTokenDistribution` | boolean | `true` | Show token distribution block |

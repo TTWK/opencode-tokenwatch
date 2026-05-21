@@ -12,7 +12,7 @@
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.js"
+      "import": "./dist/tui.jsx"
     },
     "./package.json": "./package.json"
   },

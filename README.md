@@ -9,13 +9,13 @@ OpenCode 实时 Token 用量、缓存命中率和性能指标面板。
 ## 功能
 
 - **侧边栏面板** — 会话级和按模型的实时统计（输入/输出/缓存读取）
-- **缓存命中率可视化** — 带颜色阈值（绿/黄/红）的进度条，趋势指示器（↑/↓）
+- **缓存命中率可视化** — 模型维度行内进度条，带颜色阈值和趋势指示器（↑/↓）
 - **性能指标** — 首 Token 延迟（TTFT）、每秒 Token 吞吐量（TPS）、端到端延迟
 - **Token 分布** — 按角色分解统计（系统提示/用户/Agent 指令/Tool 调用/Tool 结果）
 - **模型定价展示** — 当前模型的输入/缓存读单价
 - **`/usage` 命令** — 按模型、提供商、日期、会话分组的历史报告
 - **`/usage-settings` 命令** — 配置侧边栏显示项
-- **多级折叠** — 面板、各模型、子区块（Cache/Performance/Pricing）均可独立折叠
+- **多级折叠** — 面板、各模型、子区块（Performance/Pricing）均可独立折叠
 - **折叠状态持久化** — 重启后保持
 - **宽度自适应** — 侧边栏宽度变化时自动调整布局
 - **JSONL 日志** — 每次请求详情持久化至 `~/.opencode/tokenwatch.jsonl`
@@ -48,7 +48,6 @@ npm install opencode-tokenwatch
   "pluginConfig": {
     "opencode-tokenwatch": {
       "sidebar": {
-        "showCache": true,
         "showPerformance": true,
         "showPricing": false,
         "showTokenDistribution": false,
@@ -62,7 +61,6 @@ npm install opencode-tokenwatch
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `sidebar.showCache` | boolean | `true` | 显示缓存命中率区块 |
 | `sidebar.showPerformance` | boolean | `true` | 显示性能指标区块 |
 | `sidebar.showPricing` | boolean | `true` | 显示模型定价区块 |
 | `sidebar.showTokenDistribution` | boolean | `true` | 显示 Token 分布区块 |

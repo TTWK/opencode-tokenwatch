@@ -82,7 +82,7 @@ message.updated / message.part.updated 事件
       → 读取 api.state.session.messages 获取消息列表
       → 按 model 分组聚合 token 数据
       → 计算缓存命中率 + 趋势
-      → 渲染各区块 (Cache / Performance / Pricing / Token Distribution)
+      → 渲染各区块 (Performance / Pricing / Token Distribution)
 ```
 
 ### 3.3 技术选型
@@ -104,8 +104,7 @@ message.updated / message.part.updated 事件
   ├── For each model:
   │   ├── ModelHeader        ← 模型标题行，模型级折叠控制
   │   ├── ModelSummary       ← 模型概要行
-  │   ├── CacheBlock         ← 缓存子区块（条件渲染）
-  │   ├── PerformanceBlock   ← 性能子区块（条件渲染）
+│   ├── PerformanceBlock   ← 性能子区块（条件渲染）
   │   └── PricingBlock       ← 定价子区块（条件渲染）
   └── TokenDistributionBlock ← 会话级 Token 分布（条件渲染）
 ```
@@ -122,15 +121,16 @@ message.updated / message.part.updated 事件
 │  请求 52  成本 $0.89                     │
 │                                          │
 │  ▼ claude-sonnet-4-20250229              │  ← 模型级（▶ 折叠 / ▼ 展开）
-│    输入:30.5K  输出:892  缓存读:45K      │  ← 概要行（折叠态也显示）
-│    命中:85% ↑2.1%  请求:12  成本:$0.023   │
-│    ── Cache ───────────────────────▶    │  ← 子区块（默认折叠）
-│    ── Performance ─────────────────▶    │
+│    输入:30.5K  输出:892                   │  ← 概要行（折叠态也显示）
+│    缓存读:45K (█████████████████░ 85%↑2.1%) │
+│    请求:12  成本:$0.023                    │
+│    ── Performance ─────────────────▶    │  ← 子区块（默认折叠）
 │    ── Pricing ─────────────────────▶    │
 │                                          │
 │  ▼ deepseek-chat                         │
-│    输入:25K  输出:1.2K  缓存读:8K        │
-│    命中:20% ↓3.5%  请求:40  成本:$0.012   │
+│    输入:25K  输出:1.2K                    │
+│    缓存读:8K (████░░░░░░░░░░░░ 20%↓3.5%)   │
+│    请求:40  成本:$0.012                    │
 │    ...                                    │
 │                                          │
 │  ── Token Distribution ────────────▶    │  ← 会话级，默认折叠
@@ -151,7 +151,7 @@ message.updated / message.part.updated 事件
 |------|---------|------|
 | 整体面板 | 展开 | 控制整个侧边栏显隐，折叠时仅显示标题行 + 概要 |
 | 模型级 | 折叠 | 每个模型独立折叠/展开，折叠时显示一行概要 |
-| 子区块 (Cache/Performance/Pricing) | 折叠 | 模型展开后可独立展开各子区块 |
+| 子区块 (Performance/Pricing) | 折叠 | 模型展开后可独立展开各子区块 |
 | Token Distribution | 折叠 | 会话级别，独立于模型 |
 
 所有折叠状态通过 `api.kv` 持久化，重启后保持。
@@ -241,7 +241,6 @@ export function createPerfTracker(): PerfTracker
 ```typescript
 type TokenWatchConfig = {
   sidebar: {
-    showCache: boolean          // 默认 true
     showPerformance: boolean    // 默认 true
     showPricing: boolean        // 默认 true
     showTokenDistribution: boolean // 默认 true

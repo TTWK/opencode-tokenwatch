@@ -82,7 +82,7 @@ message.updated / message.part.updated events
       → read api.state.session.messages
       → aggregate by model
       → compute cache hit rate + trend
-      → render blocks (Cache / Performance / Pricing / Token Distribution)
+      → render blocks (Performance / Pricing / Token Distribution)
 ```
 
 ### 3.3 Tech Stack
@@ -103,8 +103,7 @@ Core component hierarchy:
   ├── For each model:
   │   ├── ModelHeader        ← model title, model-level collapse toggle
   │   ├── ModelSummary       ← model summary row
-  │   ├── CacheBlock         ← cache sub-block (conditional)
-  │   ├── PerformanceBlock   ← performance sub-block (conditional)
+│   ├── PerformanceBlock   ← performance sub-block (conditional)
   │   └── PricingBlock       ← pricing sub-block (conditional)
   └── TokenDistributionBlock ← session-level token distribution (conditional)
 ```
@@ -121,15 +120,16 @@ Each component manages collapse state via `createSignal` and computed values via
 │  Requests 52  Cost $0.89                 │
 │                                          │
 │  ▼ claude-sonnet-4-20250229              │  ← model level (▶ collapsed / ▼ expanded)
-│    In:30.5K  Out:892  Cache Read:45K    │  ← summary row (shown when collapsed)
-│    Hit Rate:85% ↑2.1%  Req:12  Cost:$0.023 │
-│    ── Cache ───────────────────────▶    │  ← sub-block (default collapsed)
-│    ── Performance ─────────────────▶    │
+│    In:30.5K  Out:892                     │  ← summary row (shown when collapsed)
+│    Cache Read:45K (█████████████████░ 85%↑2.1%) │
+│    Req:12  Cost:$0.023                    │
+│    ── Performance ─────────────────▶    │  ← sub-block (default collapsed)
 │    ── Pricing ─────────────────────▶    │
 │                                          │
 │  ▼ deepseek-chat                         │
-│    In:25K  Out:1.2K  Cache Read:8K       │
-│    Hit Rate:20% ↓3.5%  Req:40  Cost:$0.012 │
+│    In:25K  Out:1.2K                       │
+│    Cache Read:8K (████░░░░░░░░░░░░ 20%↓3.5%) │
+│    Req:40  Cost:$0.012                    │
 │    ...                                    │
 │                                          │
 │  ── Token Distribution ────────────▶    │  ← session level, default collapsed
@@ -150,7 +150,7 @@ Each component manages collapse state via `createSignal` and computed values via
 |-------|---------|-------------|
 | Global panel | Expanded | Full sidebar visibility; collapsed shows title + summary |
 | Model level | Collapsed | Per-model independent collapse; collapsed shows one summary row |
-| Sub-block (Cache/Performance/Pricing) | Collapsed | Independent collapse within an expanded model |
+| Sub-block (Performance/Pricing) | Collapsed | Independent collapse within an expanded model |
 | Token Distribution | Collapsed | Session-level, independent of models |
 
 All collapse states persisted via `api.kv`.
@@ -236,7 +236,6 @@ export function createPerfTracker(): PerfTracker
 ```typescript
 type TokenWatchConfig = {
   sidebar: {
-    showCache: boolean
     showPerformance: boolean
     showPricing: boolean
     showTokenDistribution: boolean

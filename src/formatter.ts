@@ -100,6 +100,15 @@ export function formatCost(n: number): string {
   return `$${n.toFixed(2)}`
 }
 
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return "—"
+  if (ms < 1000) return `${ms.toFixed(0)}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60000)
+  const s = Math.floor((ms % 60000) / 1000)
+  return `${m}m ${s}s`
+}
+
 export function formatFilters(filters: UsageFilters): string {
   const parts: string[] = []
   if (filters.sessionId) parts.push(`session=${filters.sessionId}`)
@@ -382,4 +391,65 @@ export function formatUsageReport(report: UsageReport): string {
     "",
     formatSessionBreakdown(report.sessions),
   ].join("\n")
+}
+
+// ── New types for v2 ──
+
+export interface SessionPerfStats {
+  models: Record<string, ModelPerfStats>
+  totals: {
+    totalInput: number
+    totalOutput: number
+    totalCacheRead: number
+    totalCacheWrite: number
+    totalRequests: number
+    totalCost: number
+  }
+}
+
+export interface ModelPerfStats {
+  model: string
+  providerID: string
+  requestCount: number
+  totalInput: number
+  totalOutput: number
+  totalCacheRead: number
+  totalCacheWrite: number
+  totalCost: number
+  avgTTFT: number | null
+  maxTTFT: number | null
+  minTTFT: number | null
+  avgTPS: number | null
+  maxTPS: number | null
+  minTPS: number | null
+  avgLatency: number | null
+  maxLatency: number | null
+  minLatency: number | null
+}
+
+export interface TokenDistribution {
+  system: number
+  user: number
+  agent: number
+  toolCall: number
+  toolResult: number
+  output: number
+  total: number
+}
+
+export interface LogEntry {
+  ts: string
+  model: string
+  providerID: string
+  modelID: string
+  sessionID: string
+  ttft_ms: number | null
+  tps: number | null
+  latency_ms: number | null
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  cost: number
 }
