@@ -5,7 +5,8 @@ import type { CombinedReportData, HtmlReportMeta } from "./formatter.js"
 import { generateUsageHtml } from "./generate-usage-html.js"
 import { t } from "./i18n.js"
 import type { SidebarConfig } from "./sidebar.jsx"
-import { createPerfTracker, readLogs } from "./perf-tracker.js"
+import { readLogs } from "./perf-tracker.js"
+import type { LogEntry, ModelPerfStats } from "./formatter.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -76,10 +77,53 @@ function openInBrowser(filePath: string): void {
   } catch { /* silently fail */ }
 }
 
+function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
+  const map = new Map<string, ModelPerfStats>()
+  for (const entry of logs) {
+    const key = entry.model
+    let s = map.get(key)
+    if (!s) {
+      s = {
+        model: key,
+        providerID: entry.providerID,
+        requestCount: 0,
+        totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheWrite: 0, totalCost: 0,
+        avgTTFT: null, maxTTFT: null, minTTFT: null,
+        avgTPS: null, maxTPS: null, minTPS: null,
+        avgLatency: null, maxLatency: null, minLatency: null,
+      }
+      map.set(key, s)
+    }
+    s.requestCount++
+    s.totalInput += entry.inputTokens
+    s.totalOutput += entry.outputTokens
+    s.totalCacheRead += entry.cacheReadTokens
+    s.totalCacheWrite += entry.cacheWriteTokens
+    s.totalCost += entry.cost
+
+    const c = s.requestCount
+    if (entry.ttft_ms != null) {
+      s.avgTTFT = s.avgTTFT != null ? s.avgTTFT + (entry.ttft_ms - s.avgTTFT) / c : entry.ttft_ms
+      s.maxTTFT = s.maxTTFT != null ? Math.max(s.maxTTFT, entry.ttft_ms) : entry.ttft_ms
+      s.minTTFT = s.minTTFT != null ? Math.min(s.minTTFT, entry.ttft_ms) : entry.ttft_ms
+    }
+    if (entry.tps != null) {
+      s.avgTPS = s.avgTPS != null ? s.avgTPS + (entry.tps - s.avgTPS) / c : entry.tps
+      s.maxTPS = s.maxTPS != null ? Math.max(s.maxTPS, entry.tps) : entry.tps
+      s.minTPS = s.minTPS != null ? Math.min(s.minTPS, entry.tps) : entry.tps
+    }
+    if (entry.latency_ms != null) {
+      s.avgLatency = s.avgLatency != null ? s.avgLatency + (entry.latency_ms - s.avgLatency) / c : entry.latency_ms
+      s.maxLatency = s.maxLatency != null ? Math.max(s.maxLatency, entry.latency_ms) : entry.latency_ms
+      s.minLatency = s.minLatency != null ? Math.min(s.minLatency, entry.latency_ms) : entry.latency_ms
+    }
+  }
+  return Array.from(map.values())
+}
+
 async function buildCombinedData(api: TuiPluginApi): Promise<CombinedReportData> {
   const report = await getUsageReport({})
   const logs = readLogs(1000)
-  const perfSummary = createPerfTracker().getSessionStats()
 
   const now = new Date()
   const meta: HtmlReportMeta = {
@@ -93,7 +137,7 @@ async function buildCombinedData(api: TuiPluginApi): Promise<CombinedReportData>
   return {
     ...report,
     perfLogs: logs,
-    perfSummary: Object.values(perfSummary.models),
+    perfSummary: aggregatePerfStats(logs),
     meta,
   }
 }
