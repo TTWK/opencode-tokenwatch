@@ -453,3 +453,21 @@ export interface LogEntry {
   cacheWriteTokens: number
   cost: number
 }
+
+// ── HTML report types ──
+
+export interface HtmlReportMeta {
+  generatedAt: string
+  dateRange: { start: string; end: string }
+}
+
+export interface CombinedReportData {
+  summary: SessionTokenData
+  models: ModelBreakdownItem[]
+  providers: ProviderBreakdownItem[]
+  daily: DailyBreakdownItem[]
+  sessions: SessionBreakdownItem[]
+  perfLogs: LogEntry[]
+  perfSummary: ModelPerfStats[]
+  meta: HtmlReportMeta
+}
