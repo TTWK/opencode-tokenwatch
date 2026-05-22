@@ -1,9 +1,11 @@
 import type { TuiDialogStack, TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { getUsageReport } from "./queries.js"
+import { getUsageReport, getPresetRange } from "./queries.js"
+import type { UsageFilters } from "./formatter.js"
 import { formatUsageReport } from "./formatter.js"
 import type { CombinedReportData, HtmlReportMeta } from "./formatter.js"
 import { generateUsageHtml } from "./generate-usage-html.js"
-import { t } from "./i18n.js"
+import { t, setLanguage } from "./i18n.js"
+import type { SupportedLanguage } from "./i18n.js"
 import type { SidebarConfig } from "./sidebar.jsx"
 import { readLogs } from "./perf-tracker.js"
 import type { LogEntry, ModelPerfStats } from "./formatter.js"
@@ -20,43 +22,13 @@ const DEFAULT_CONFIG: SidebarConfig = {
 export async function registerCommands(api: TuiPluginApi): Promise<void> {
   api.command?.register(() => [
     {
-      value: "tokenwatch-html-report",
-      title: "Generate HTML report",
-      description: "Generate an HTML dashboard with token usage, cache efficiency, and performance charts",
+      value: "tokenwatch-usage",
+      title: "TokenWatch",
+      description: "Token usage reports, export, and settings",
       category: "Stats",
-      slash: { name: "usage-html", aliases: ["usage"] },
-      onSelect: async () => {
-        await showHtmlReport(api)
-      },
-    },
-    {
-      value: "tokenwatch-json-export",
-      title: "Export as JSON",
-      description: "Export usage data as JSON file",
-      category: "Stats",
-      slash: { name: "usage-json" },
-      onSelect: async () => {
-        await showJsonExport(api)
-      },
-    },
-    {
-      value: "tokenwatch-text-report",
-      title: "Text report (legacy)",
-      description: "View plain text usage report in terminal",
-      category: "Stats",
-      slash: { name: "usage-text" },
-      onSelect: async () => {
-        await showTextReport(api)
-      },
-    },
-    {
-      value: "tokenwatch-settings",
-      title: "TokenWatch Settings",
-      description: "Configure sidebar display options",
-      category: "Stats",
-      slash: { name: "usage-settings", aliases: ["tokenwatch-settings"] },
+      slash: { name: "usage" },
       onSelect: async (dialog) => {
-        await showSettingsDialog(api, dialog)
+        if (dialog) showUsageMenu(api, dialog)
       },
     },
   ])
@@ -121,8 +93,8 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
   return Array.from(map.values())
 }
 
-async function buildCombinedData(api: TuiPluginApi): Promise<CombinedReportData> {
-  const report = await getUsageReport({})
+async function buildCombinedData(api: TuiPluginApi, filters: UsageFilters = {}): Promise<CombinedReportData> {
+  const report = await getUsageReport(filters)
   const logs = readLogs(1000)
 
   const now = new Date()
@@ -143,9 +115,9 @@ async function buildCombinedData(api: TuiPluginApi): Promise<CombinedReportData>
   }
 }
 
-async function showHtmlReport(api: TuiPluginApi): Promise<void> {
+async function showHtmlReport(api: TuiPluginApi, filters: UsageFilters = {}): Promise<void> {
   try {
-    const data = await buildCombinedData(api)
+    const data = await buildCombinedData(api, filters)
     const html = generateUsageHtml(data)
     const dir = ensureReportDir()
     const dateStr = new Date().toISOString().slice(0, 10)
@@ -158,6 +130,80 @@ async function showHtmlReport(api: TuiPluginApi): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err)
     api.ui.toast?.({ message: `Error: ${msg}`, variant: "error" })
   }
+}
+
+function showHtmlReportRangeMenu(api: TuiPluginApi, dialog: TuiDialogStack): void {
+  dialog.replace(() => (
+    <api.ui.DialogSelect
+      title={t("cmdTitleHtml")}
+      placeholder="Select date range..."
+      options={[
+        {
+          title: t("menuToday"),
+          value: "today",
+          onSelect: () => {
+            dialog.clear()
+            const d = new Date()
+            const pad = (n: number) => String(n).padStart(2, "0")
+            const s = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+            showHtmlReport(api, { startDate: s, endDate: s })
+          },
+        },
+        {
+          title: t("menu7d"),
+          value: "7d",
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("7d")) },
+        },
+        {
+          title: t("menu30d"),
+          value: "30d",
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("30d")) },
+        },
+        {
+          title: t("menuAll"),
+          value: "all",
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("all")) },
+        },
+      ]}
+      flat={true}
+    />
+  ))
+}
+
+function showUsageMenu(api: TuiPluginApi, dialog: TuiDialogStack): void {
+  dialog.replace(() => (
+    <api.ui.DialogSelect
+      title={t("panelTitle")}
+      placeholder="Select an action..."
+      options={[
+        {
+          title: `${t("cmdTitleHtml")} ▸`,
+          value: "html",
+          description: t("cmdDescHtml"),
+          onSelect: () => showHtmlReportRangeMenu(api, dialog),
+        },
+        {
+          title: t("cmdTitleJson"),
+          value: "json",
+          description: t("cmdDescJson"),
+          onSelect: () => { dialog.clear(); showJsonExport(api) },
+        },
+        {
+          title: t("cmdTitleText"),
+          value: "text",
+          description: t("cmdDescText"),
+          onSelect: () => { dialog.clear(); showTextReport(api) },
+        },
+        {
+          title: `${t("cmdTitleSettings")} ▸`,
+          value: "settings",
+          description: t("cmdDescSettings"),
+          onSelect: () => showSettingsDialog(api, dialog),
+        },
+      ]}
+      flat={true}
+    />
+  ))
 }
 
 async function showJsonExport(api: TuiPluginApi): Promise<void> {
@@ -207,37 +253,43 @@ function showSettingsDialog(api: TuiPluginApi, dialog?: TuiDialogStack): void {
 
   dialog.replace(() => (
     <api.ui.DialogSelect
-      title="TokenWatch Settings"
-      placeholder="Toggle settings..."
+      title={t("settingsTitle")}
+      placeholder={t("settingsPlaceholder")}
       options={[
         {
-          title: `${cfg.showPerformance ? "✓ " : "  "}Show Performance (TPS/TPOT)`,
+          title: `${cfg.showPerformance ? "✓ " : "  "}${t("showPerformance")}`,
           value: "showPerformance",
-          description: "Display TPS, TPOT, latency metrics in sidebar",
+          description: t("descShowPerformance"),
           onSelect: () => { toggleSidebarSetting(api, "showPerformance"); reopen("showPerformance") },
         },
         {
-          title: `${cfg.showPricing ? "✓ " : "  "}Show Pricing`,
+          title: `${cfg.showPricing ? "✓ " : "  "}${t("showPricing")}`,
           value: "showPricing",
-          description: "Display cost estimates in sidebar",
+          description: t("descShowPricing"),
           onSelect: () => { toggleSidebarSetting(api, "showPricing"); reopen("showPricing") },
         },
         {
-          title: `${cfg.showTokenDistribution ? "✓ " : "  "}Show Token Distribution`,
+          title: `${cfg.showTokenDistribution ? "✓ " : "  "}${t("showTokenDistribution")}`,
           value: "showTokenDistribution",
-          description: "Display input/output/reasoning token breakdown in sidebar",
+          description: t("descShowTokenDistribution"),
           onSelect: () => { toggleSidebarSetting(api, "showTokenDistribution"); reopen("showTokenDistribution") },
         },
         {
-          title: `${cfg.showTrend ? "✓ " : "  "}Show Trend`,
+          title: `${cfg.showTrend ? "✓ " : "  "}${t("showTrend")}`,
           value: "showTrend",
-          description: "Display token usage trend chart in sidebar",
+          description: t("descShowTrend"),
           onSelect: () => { toggleSidebarSetting(api, "showTrend"); reopen("showTrend") },
         },
         {
-          title: "Done",
+          title: `${t("settingsLanguage")} ▸`,
+          value: "language",
+          description: t("descSettingsLanguage"),
+          onSelect: () => showLanguageMenu(api, dialog),
+        },
+        {
+          title: t("done"),
           value: "done",
-          description: "Close settings",
+          description: t("closeSettings"),
           onSelect: () => { lastSelectedSetting = undefined; dialog.clear() },
         },
       ]}
@@ -245,6 +297,46 @@ function showSettingsDialog(api: TuiPluginApi, dialog?: TuiDialogStack): void {
       current={lastSelectedSetting}
     />
   ))
+}
+
+function showLanguageMenu(api: TuiPluginApi, dialog: TuiDialogStack): void {
+  const current = (api.kv?.get?.("tokenwatch-config") as Partial<SidebarConfig>)?.language ?? "auto"
+  dialog.replace(() => (
+    <api.ui.DialogSelect
+      title={t("settingsLanguage")}
+      placeholder={t("settingsLanguage")}
+      options={[
+        {
+          title: `${current === "auto" ? "✓ " : "  "}${t("langAuto")}`,
+          value: "auto",
+          description: "自动检测 / Auto-detect",
+          onSelect: () => { setLanguageSetting(api, "auto"); lastSelectedSetting = "language"; dialog.clear(); showSettingsDialog(api, dialog) },
+        },
+        {
+          title: `${current === "zh" ? "✓ " : "  "}中文`,
+          value: "zh",
+          description: "简体中文",
+          onSelect: () => { setLanguageSetting(api, "zh"); lastSelectedSetting = "language"; dialog.clear(); showSettingsDialog(api, dialog) },
+        },
+        {
+          title: `${current === "en" ? "✓ " : "  "}English`,
+          value: "en",
+          description: "English",
+          onSelect: () => { setLanguageSetting(api, "en"); lastSelectedSetting = "language"; dialog.clear(); showSettingsDialog(api, dialog) },
+        },
+      ]}
+      flat={true}
+    />
+  ))
+}
+
+function setLanguageSetting(api: TuiPluginApi, lang: SupportedLanguage | "auto"): void {
+  setLanguage(lang)
+  const current = loadConfigFromStore(api)
+  current.language = lang
+  saveConfigToStore(api, current)
+  const v = (api.kv?.get?.("tokenwatch-config-version") as number ?? 0) + 1
+  api.kv?.set?.("tokenwatch-config-version", v)
 }
 
 function toggleSidebarSetting(api: TuiPluginApi, key: keyof SidebarConfig["sidebar"]): void {

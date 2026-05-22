@@ -2,26 +2,23 @@
 
 **English** · [简体中文](./README.md)
 
-Real-time token usage, cache hit rate, and performance metrics panel for OpenCode.
+Real-time token usage, cache analytics & performance dashboard for OpenCode CLI.
 
-Adds a live sidebar panel and `/usage` slash command that reads your local OpenCode history from SQLite, aggregates token usage by model, provider, date, and session, and supports export to JSON or CSV.
+Adds a live sidebar panel and `/usage` slash command that reads your local OpenCode history from SQLite, aggregates token usage by model, provider, date, and session, and supports export to HTML, JSON, or Markdown.
 
 ## Features
 
-- **Sidebar panel** — Session-level and per-model real-time statistics (input/output/cache read)
-- **Cache hit rate visualization** — Inline progress bar in model row with color thresholds and trend indicator (↑/↓)
+- **Sidebar panel** — Session-level and per-model real-time stats (requests, input/output tokens, cache, latency, cost)
+- **Cache hit rate visualization** — Inline progress bars with color thresholds (green/yellow/red) and trend indicators (↑/↓)
 - **Performance metrics** — Time to first token (TTFT), tokens per second (TPS), end-to-end latency
-- **Token distribution** — Breakdown by role (system/user/Agent instruction/Tool call/Tool result)
-- **Model pricing display** — Input/cache read unit prices for the current model
-- **`/usage` command** — Historical reports grouped by model, provider, date, and session
-- **`/usage-settings` command** — Configure sidebar display options
-- **Multi-level collapse** — Panel, models, and sub-blocks (Performance/Pricing) collapsible independently
-- **Collapse state persistence** — Restored after restart
-- **Width adaptive** — Automatically adjusts layout when sidebar width changes
-- **JSONL logging** — Per-request details persisted to `~/.opencode/tokenwatch.jsonl`
-- **i18n** — Auto-detects system language, configurable override
-- **Adaptive coloring** — Colors auto-derived from theme with desaturation
-- **Export** — Full reports to JSON / CSV
+- **Token distribution** — Breakdown by role (system/user/Agent instruction/Tool call/Tool result/output)
+- **Model pricing** — Input/cache-read/output unit prices for the current model
+- **`/usage` command** — One-stop main menu: HTML Report → JSON Export → Text Report → Settings
+- **HTML report** — Interactive ECharts dashboard with KPI cards, stacked bar charts, scatter plots, auto-opened in browser
+- **Multi-level collapse** — Panel, individual models, and sub-blocks (Performance/Pricing/Token Distribution) collapsible independently; state persists across restarts
+- **Language switching** — Auto-detects system language; override via Settings menu at runtime
+- **Per-request tracking** — TTFT/TPS/latency persisted to JSONL for performance analysis in reports
+- **Adaptive coloring** — Colors auto-derived from the theme with desaturation
 
 ## Install
 
@@ -40,7 +37,7 @@ Add to `opencode.json` or `opencode.jsonc`:
 
 ## Configuration
 
-Customize sidebar display and language via `pluginConfig` (optional):
+Optionally customize sidebar display and language via `pluginConfig`:
 
 ```jsonc
 {
@@ -61,34 +58,33 @@ Customize sidebar display and language via `pluginConfig` (optional):
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sidebar.showPerformance` | boolean | `true` | Show performance metrics block |
+| `sidebar.showPerformance` | boolean | `true` | Show TTFT/TPS/latency block |
 | `sidebar.showPricing` | boolean | `true` | Show model pricing block |
 | `sidebar.showTokenDistribution` | boolean | `true` | Show token distribution block |
 | `sidebar.showTrend` | boolean | `true` | Show trend indicator |
 | `language` | `"auto"` / `"zh"` / `"en"` | `"auto"` | UI language; `"auto"` follows system locale |
 
+Settings can also be toggled interactively via `/usage` → Settings, taking precedence over `pluginConfig`.
+
 ## Usage
 
 In OpenCode TUI:
 
-1. Open the right sidebar to see live session statistics.
-2. Run `/usage` for multi-dimension historical reports.
-3. Run `/usage-settings` to adjust sidebar display options.
-
-Exports are written to the current working directory:
-
-- `tokenwatch-usage-report.json`
-- `tokenwatch-models.csv`
-- `tokenwatch-providers.csv`
-- `tokenwatch-daily.csv`
-- `tokenwatch-sessions.csv`
+1. Open the right sidebar to view live session statistics
+2. Run `/usage` to open the main menu:
+   - **HTML Report** — Pick a date range (Today / 7 days / 30 days / All), generates an interactive dashboard and opens it in your browser
+   - **JSON Export** — Exports the full usage report to `~/.opencode/reports/`
+   - **Text Report** — Exports a Markdown-formatted report to `~/.opencode/reports/`
+   - **Settings** — Toggle sidebar display blocks, switch interface language
 
 ## Report Dimensions
 
-- By model
-- By provider
-- By date
-- By session
+Queries your local OpenCode SQLite database, aggregated by:
+
+- Model
+- Provider
+- Date (daily trends)
+- Session
 - Current session summary
 
 ## Requirements
@@ -102,14 +98,6 @@ Exports are written to the current working directory:
 npm install
 npm run build
 ```
-
-## Publish Prep
-
-```sh
-npm run release:check
-```
-
-Runs build and `npm pack --dry-run` with an isolated temp cache, especially helpful on Windows when the default cache is locked.
 
 ## License
 

@@ -190,13 +190,13 @@ export function formatSessionSummary(data: SessionTokenData, title = "Current Se
     `═══ ${title} ═══`,
     `Models:        ${modelLabel}`,
     `Provider:      ${data.provider || "(mixed)"}`,
-    `Requests:      ${data.requestCount}`,
+    `Req:           ${data.requestCount}`,
     `Total Tokens:  ${formatTokens(data.totalTokens)}`,
     `  Input:       ${formatTokens(data.inputTokens)}`,
     `  Output:      ${formatTokens(data.outputTokens)}`,
     `  Reasoning:   ${formatTokens(data.reasoningTokens)}`,
-    `  Cache Read:  ${formatTokens(data.cacheRead)}`,
-    `  Cache Write: ${formatTokens(data.cacheWrite)}`,
+    `  C.Read:      ${formatTokens(data.cacheRead)}`,
+    `  C.Write:     ${formatTokens(data.cacheWrite)}`,
     `  Cost:        ${formatCost(data.totalCost)}`,
   ].join("\n")
 }

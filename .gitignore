@@ -4,4 +4,6 @@ dist/
 .opencode/
 tokenwatch-*.json
 tokenwatch-*.csv
+tokenwatch-*.html
+tokenwatch-*.md
 .worktrees/

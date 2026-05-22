@@ -271,7 +271,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
       <Show when={!collapse().global}>
         <text fg={mutedColor()}>
-          {t("total")}: {formatTokens(sessionTotals().totalTokens)}  {t("requests")}:{sessionTotals().totalRequests}
+          {t("total")}:{formatTokens(sessionTotals().totalTokens)}  {t("requests")}:{sessionTotals().totalRequests}
         </text>
         <text fg={mutedColor()}>
           {t("input")}:{formatTokens(sessionTotals().totalInput)}  {t("output")}:{formatTokens(sessionTotals().totalOutput)}  {t("cacheRead")}:{formatTokens(sessionTotals().totalCacheRead)}
@@ -307,7 +307,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                   {t("input")}:{formatTokens(stat.totalInput)}  {t("output")}:{formatTokens(stat.totalOutput)}
                 </text>
                 <text fg={mutedColor()}>
-                    {t("cache")}:{formatTokens(stat.cacheRead + stat.cacheWrite)} (
+                    {t("cache")}:{formatTokens(stat.cacheRead + stat.cacheWrite)}(
                     <span style={({ fg: hitRateColor(hitRate) } as any)}>
                       {progressFilled(hitRate, Math.max(3, Math.floor(panelWidth() / 3)))}
                       {progressRemaining(hitRate, Math.max(3, Math.floor(panelWidth() / 3)))}
@@ -329,7 +329,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                       </box>
                       <Show when={!collapse().subBlocks[`perf-${key}`]}>
                         <text fg={mutedColor()}>
-                          {t("ttft")}: {formatDuration(perfTracker.getSessionStats().models[key]?.avgTTFT ?? null)}  {t("tps")}: {perfTracker.getSessionStats().models[key]?.avgTPS?.toFixed(1) ?? "—"}  {t("latency")}: {formatDuration(perfTracker.getSessionStats().models[key]?.avgLatency ?? null)}
+                          {t("ttft")}:{formatDuration(perfTracker.getSessionStats().models[key]?.avgTTFT ?? null)}  {t("tps")}:{perfTracker.getSessionStats().models[key]?.avgTPS?.toFixed(1) ?? "—"}  {t("latency")}:{formatDuration(perfTracker.getSessionStats().models[key]?.avgLatency ?? null)}
                         </text>
                       </Show>
                     </box>
@@ -341,8 +341,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                         <text fg={textColor()}>{!collapse().subBlocks[`pricing-${key}`] ? "▼" : "▶"}  ── {t("pricing")} ──</text>
                       </box>
                       <Show when={!collapse().subBlocks[`pricing-${key}`]}>
-                        <text fg={mutedColor()}>    {t("cost")}: {formatCost(stat.totalCost)}</text>
-                        <text fg={mutedColor()}>    {t("modelLabel")}: {stat.providerID}/{stat.modelID}</text>
+                        <text fg={mutedColor()}>    {t("cost")}:{formatCost(stat.totalCost)}</text>
+                        <text fg={mutedColor()}>    {t("modelLabel")}:{stat.providerID}/{stat.modelID}</text>
                       </Show>
                     </box>
                   </Show>
@@ -360,7 +360,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
             <Show when={!collapse().subBlocks["token-dist"]}>
               <For each={Object.entries(tokenDistribution())}>
                 {([role, tokens]) => (
-                  <text fg={mutedColor()}>    {t(role)}: {formatTokens(tokens)}</text>
+                  <text fg={mutedColor()}>    {t(role)}:{formatTokens(tokens)}</text>
                 )}
               </For>
             </Show>
