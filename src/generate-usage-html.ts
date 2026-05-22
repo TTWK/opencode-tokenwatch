@@ -1,6 +1,7 @@
 import type { CombinedReportData, ModelBreakdownItem } from "./formatter.js"
 
 function fmtTokens(n: number): string {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B"
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M"
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K"
   return String(n)
@@ -8,7 +9,7 @@ function fmtTokens(n: number): string {
 
 function fmtCost(n: number): string {
   if (n < 0.01) return "$" + n.toFixed(6)
-  return "$" + n.toFixed(4)
+  return "$" + n.toFixed(2)
 }
 
 function fmtPercent(n: number): string {
@@ -547,7 +548,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
 <title>TokenWatch Usage Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
   :root {
     --bg: #0C0C0E;
@@ -721,7 +722,10 @@ export function generateUsageHtml(data: CombinedReportData): string {
 <script>
 var fmt = function(v) {
   if (v == null) return '\u2014';
-  return v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : String(v);
+  if (v >= 1000000000) return (v/1000000000).toFixed(1)+'B';
+  if (v >= 1000000) return (v/1000000).toFixed(1)+'M';
+  if (v >= 1000) return (v/1000).toFixed(1)+'K';
+  return String(v);
 };
 
 window.switchTab = function(name) {
