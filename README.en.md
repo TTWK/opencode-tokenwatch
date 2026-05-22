@@ -2,23 +2,23 @@
 
 **English** · [简体中文](./README.md)
 
-Real-time token usage, cache analytics & performance dashboard for OpenCode CLI.
+![Sidebar](./assets/sidebar.png)
 
-Adds a live sidebar panel and `/usage` slash command that reads your local OpenCode history from SQLite, aggregates token usage by model, provider, date, and session, and supports export to HTML, JSON, or Markdown.
+Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI.
 
 ## Features
 
-- **Sidebar panel** — Session-level and per-model real-time stats (requests, input/output tokens, cache, latency, cost)
-- **Cache hit rate visualization** — Inline progress bars with color thresholds (green/yellow/red) and trend indicators (↑/↓)
+- **Sidebar panel** — Session-level and per-model real-time stats (requests, tokens, cache, latency, cost)
+- **Cache hit rate** — Inline progress bars with color thresholds and trend indicators (↑/↓)
 - **Performance metrics** — Time to first token (TTFT), tokens per second (TPS), end-to-end latency
-- **Token distribution** — Breakdown by role (system/user/Agent instruction/Tool call/Tool result/output)
-- **Model pricing** — Input/cache-read/output unit prices for the current model
-- **`/usage` command** — One-stop main menu: HTML Report → JSON Export → Text Report → Settings
-- **HTML report** — Interactive ECharts dashboard with KPI cards, stacked bar charts, scatter plots, auto-opened in browser
-- **Multi-level collapse** — Panel, individual models, and sub-blocks (Performance/Pricing/Token Distribution) collapsible independently; state persists across restarts
-- **Language switching** — Auto-detects system language; override via Settings menu at runtime
-- **Per-request tracking** — TTFT/TPS/latency persisted to JSONL for performance analysis in reports
-- **Adaptive coloring** — Colors auto-derived from the theme with desaturation
+- **Token distribution** — Breakdown by role (system, user, Agent, Tool, etc.)
+- **Model pricing** — Input/cache/output unit prices
+- **`/usage` command** — HTML Report → JSON Export → Text Report → Settings
+- **HTML report** — Interactive ECharts dashboard, auto-opened in browser
+- **Multi-level collapse** — Panel, models, and sub-blocks collapsible with persisted state
+- **Language switching** — Auto-detect or manually switch between Chinese and English
+- **Per-request tracking** — TTFT/TPS/latency logged to JSONL for report analysis
+- **Adaptive coloring** — Colors auto-derived from theme
 
 ## Install
 
@@ -36,8 +36,6 @@ Add to `opencode.json` or `opencode.jsonc`:
 ```
 
 ## Configuration
-
-Optionally customize sidebar display and language via `pluginConfig`:
 
 ```jsonc
 {
@@ -58,34 +56,22 @@ Optionally customize sidebar display and language via `pluginConfig`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sidebar.showPerformance` | boolean | `true` | Show TTFT/TPS/latency block |
-| `sidebar.showPricing` | boolean | `true` | Show model pricing block |
-| `sidebar.showTokenDistribution` | boolean | `true` | Show token distribution block |
+| `sidebar.showPerformance` | boolean | `true` | Show TTFT/TPS/latency |
+| `sidebar.showPricing` | boolean | `true` | Show model pricing |
+| `sidebar.showTokenDistribution` | boolean | `true` | Show token distribution |
 | `sidebar.showTrend` | boolean | `true` | Show trend indicator |
-| `language` | `"auto"` / `"zh"` / `"en"` | `"auto"` | UI language; `"auto"` follows system locale |
+| `language` | `"auto"` / `"zh"` / `"en"` | `"auto"` | UI language |
 
-Settings can also be toggled interactively via `/usage` → Settings, taking precedence over `pluginConfig`.
+Settings can also be toggled via `/usage` → Settings, taking precedence over `pluginConfig`.
 
 ## Usage
 
-In OpenCode TUI:
+In OpenCode TUI, run `/usage`:
 
-1. Open the right sidebar to view live session statistics
-2. Run `/usage` to open the main menu:
-   - **HTML Report** — Pick a date range (Today / 7 days / 30 days / All), generates an interactive dashboard and opens it in your browser
-   - **JSON Export** — Exports the full usage report to `~/.opencode/reports/`
-   - **Text Report** — Exports a Markdown-formatted report to `~/.opencode/reports/`
-   - **Settings** — Toggle sidebar display blocks, switch interface language
-
-## Report Dimensions
-
-Queries your local OpenCode SQLite database, aggregated by:
-
-- Model
-- Provider
-- Date (daily trends)
-- Session
-- Current session summary
+- **HTML Report** — Pick a date range, generates a dashboard and opens it in browser
+- **JSON Export** — Exports full usage data to `~/.opencode/reports/`
+- **Text Report** — Exports Markdown report to `~/.opencode/reports/`
+- **Settings** — Toggle sidebar blocks, switch language
 
 ## Requirements
 
@@ -98,6 +84,12 @@ Queries your local OpenCode SQLite database, aggregated by:
 npm install
 npm run build
 ```
+
+## Related
+
+- [opencode-throughput](https://github.com/Howardzhangdqs/opencode-throughput) — Real-time LLM performance monitoring (TTFT/TPS/latency/cost)
+- [opencode-visual-cache](https://github.com/Hotakus/opencode-visual-cache) — TUI sidebar cache hit rate visualization, token distribution analysis
+- [magic-context](https://github.com/cortexkit/magic-context/) — Cache-aware infinite context + cross-session memory system
 
 ## License
 
