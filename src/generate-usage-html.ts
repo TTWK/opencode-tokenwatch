@@ -93,6 +93,8 @@ function initModelChart() {
 }
 
 function renderModelChart(chart) {
+  var isPercent = currentStackMode === 'percent';
+  var totals = modelInput.map(function(v, i) { return v + modelOutput[i] + modelCache[i]; });
   var option = {
     tooltip: {
       trigger: 'axis',
@@ -128,10 +130,14 @@ function renderModelChart(chart) {
     },
     yAxis: [
       {
-        type: 'value',
-        name: 'Tokens',
+        type: isPercent ? 'value' : 'value',
+        name: isPercent ? 'Percentage' : 'Tokens',
+        max: isPercent ? 100 : null,
         nameTextStyle: { color: '#B0B0C0' },
-        axisLabel: { color: '#B0B0C0', formatter: fmt },
+        axisLabel: {
+          color: '#B0B0C0',
+          formatter: isPercent ? function(v) { return v + '%'; } : fmt
+        },
         splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
       },
       {
@@ -146,40 +152,36 @@ function renderModelChart(chart) {
       {
         name: 'Input',
         type: 'bar',
-        stack: 'tokens',
-        data: modelInput,
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelInput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelInput,
         itemStyle: { color: '#00D1FF' },
         barMaxWidth: 40,
         label: {
-          show: currentStackMode === 'percent',
+          show: isPercent,
           position: 'inside',
-          formatter: function(p) {
-            return (p.value / modelInput.concat(modelOutput).concat(modelCache).reduce(function(a,b){return a+b;}, 0) * 100).toFixed(1) + '%';
-          },
+          formatter: function(p) { return p.value.toFixed(1) + '%'; },
           color: '#fff', fontSize: 10
         }
       },
       {
         name: 'Output',
         type: 'bar',
-        stack: 'tokens',
-        data: modelOutput,
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelOutput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelOutput,
         itemStyle: { color: '#B545FF' },
         barMaxWidth: 40,
         label: {
-          show: currentStackMode === 'percent',
+          show: isPercent,
           position: 'inside',
-          formatter: function(p) {
-            return (p.value / modelInput.concat(modelOutput).concat(modelCache).reduce(function(a,b){return a+b;}, 0) * 100).toFixed(1) + '%';
-          },
+          formatter: function(p) { return p.value.toFixed(1) + '%'; },
           color: '#fff', fontSize: 10
         }
       },
       {
         name: 'Cache',
         type: 'bar',
-        stack: 'tokens',
-        data: modelCache,
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelCache.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelCache,
         itemStyle: { color: '#00F593' },
         barMaxWidth: 40,
         label: {
@@ -227,19 +229,25 @@ window.setStackMode = function(mode) {
 function renderScatterChartInit(data: CombinedReportData): string {
   if (data.perfSummary.length === 0) return ""
 
+  const providerColors: Record<string, string> = {
+    opencode: "#00F593", deepseek: "#00D1FF", nvidia: "#B545FF", modelscope: "#FFB800",
+  }
+
   const scatterData = data.perfSummary.map(p => {
-    const modelData = data.models.find(m => m.model === p.model)
     const costPer1K = p.totalInput + p.totalOutput > 0
       ? (p.totalCost / (p.totalInput + p.totalOutput)) * 1000
       : 0
     return {
       name: p.model,
+      provider: p.providerID,
+      tps: p.avgTPS,
       value: [p.avgTTFT ?? 0, costPer1K, p.requestCount]
     }
   })
 
   return `
 var scatterData = ${JSON.stringify(scatterData)};
+var providerColors = ${JSON.stringify(providerColors)};
 
 function initScatterChart() {
   var el = document.getElementById('scatter-chart');
@@ -250,10 +258,12 @@ function initScatterChart() {
     tooltip: {
       formatter: function(params) {
         var d = params.data;
-        return '<b>' + d[3] + '</b><br/>' +
-          'TTFT: ' + (d[0] != null ? d[0].toFixed(1) + 'ms' : '—') + '<br/>' +
-          'Cost/1K: $' + d[1].toFixed(4) + '<br/>' +
-          'Requests: ' + d[2];
+        return '<b>' + params.name + '</b><br/>' +
+          'Provider: ' + (d.provider || '—') + '<br/>' +
+          'TTFT: ' + (d.value[0] != null ? d.value[0].toFixed(1) + 'ms' : '—') + '<br/>' +
+          'TPS: ' + (d.tps != null ? d.tps.toFixed(1) : '—') + '<br/>' +
+          'Cost/1K: $' + d.value[1].toFixed(4) + '<br/>' +
+          'Requests: ' + d.value[2];
       }
     },
     grid: { left: 70, right: 30, bottom: 40, top: 20 },
@@ -273,11 +283,19 @@ function initScatterChart() {
     },
     series: [{
       type: 'scatter',
-      data: scatterData.map(function(d) { return { value: d.value, name: d.name }; }),
+      data: scatterData.map(function(d) {
+        return {
+          value: d.value,
+          name: d.name,
+          provider: d.provider,
+          tps: d.tps,
+          itemStyle: { color: providerColors[d.provider] || '#B545FF' }
+        };
+      }),
       symbolSize: function(val) {
         return Math.max(8, Math.min(40, Math.sqrt(val[2]) * 3));
       },
-      itemStyle: { color: '#B545FF', opacity: 0.8 },
+      itemStyle: { opacity: 0.8 },
       label: {
         show: true,
         formatter: function(p) { return p.name; },
@@ -292,10 +310,13 @@ function initScatterChart() {
 }`
 }
 
+function providerBorderColor(provider: string): string {
+  const colors: Record<string, string> = { opencode: "#00F593", deepseek: "#00D1FF", nvidia: "#B545FF", modelscope: "#FFB800", }
+  return colors[provider] || "#2A2A35"
+}
+
 function renderProviderCards(data: CombinedReportData): string {
   return data.providers.map(p => {
-    const hitRate = cacheHitRate(p.inputTokens, p.cacheRead)
-    const hitRatePct = fmtPercent(hitRate)
     const modelCount = data.models.filter(m => m.provider === p.provider).length
     const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider)
     const avgTtft = perfItems.length > 0
@@ -308,7 +329,7 @@ function renderProviderCards(data: CombinedReportData): string {
       : null
 
     return `
-    <div class="provider-card">
+    <div class="provider-card" style="border-color:${providerBorderColor(p.provider)}">
       <div class="provider-name">${p.provider}</div>
       <div class="provider-stat"><span class="stat-label">Tokens</span><span>${fmtTokens(p.totalTokens)}</span></div>
       <div class="provider-stat"><span class="stat-label">Cost</span><span>${fmtCost(p.totalCost)}</span></div>
@@ -690,9 +711,9 @@ export function generateUsageHtml(data: CombinedReportData): string {
     </div>
   </div>
 
-  <div class="footer">
-    Generated by TokenWatch &middot; <a href="https://opencode.ai" style="color:var(--input);text-decoration:none">opencode.ai</a>
-  </div>
+    <div class="footer">
+      Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="#" onclick="var d=document.getElementById('report-data');var b=new Blob([d.textContent],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tokenwatch-data.json';a.click();return false" style="color:var(--input);text-decoration:none">JSON</a>
+    </div>
 </div>
 
 <script id="report-data" type="application/json">${jsonData}</script>

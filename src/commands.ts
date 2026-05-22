@@ -177,7 +177,7 @@ async function showTextReport(api: TuiPluginApi): Promise<void> {
   try {
     const report = await getUsageReport({})
     const formatted = formatUsageReport(report)
-    api.ui.toast?.({ message: "Usage report generated", variant: "info" })
+    api.ui.toast?.({ message: formatted, variant: "info" })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     api.ui.toast?.({ message: `Error: ${msg}`, variant: "error" })
