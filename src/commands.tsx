@@ -1,4 +1,4 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
+import type { TuiDialogStack, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { getUsageReport } from "./queries.js"
 import { formatUsageReport } from "./formatter.js"
 import type { CombinedReportData, HtmlReportMeta } from "./formatter.js"
@@ -55,8 +55,8 @@ export async function registerCommands(api: TuiPluginApi): Promise<void> {
       description: "Configure sidebar display options",
       category: "Stats",
       slash: { name: "usage-settings", aliases: ["tokenwatch-settings"] },
-      onSelect: async () => {
-        await showSettingsDialog(api)
+      onSelect: async (dialog) => {
+        await showSettingsDialog(api, dialog)
       },
     },
   ])
@@ -126,8 +126,9 @@ async function buildCombinedData(api: TuiPluginApi): Promise<CombinedReportData>
   const logs = readLogs(1000)
 
   const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
   const meta: HtmlReportMeta = {
-    generatedAt: now.toISOString().slice(0, 10) + " " + now.toISOString().slice(11, 19),
+    generatedAt: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
     dateRange: {
       start: report.daily.length > 0 ? report.daily[report.daily.length - 1].day : "—",
       end: report.daily.length > 0 ? report.daily[0].day : "—",
@@ -177,26 +178,81 @@ async function showTextReport(api: TuiPluginApi): Promise<void> {
   try {
     const report = await getUsageReport({})
     const formatted = formatUsageReport(report)
-    api.ui.toast?.({ message: formatted, variant: "info" })
+    const dir = ensureReportDir()
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const filePath = join(dir, `tokenwatch-${dateStr}.md`)
+    writeFileSync(filePath, formatted, "utf-8")
+    api.ui.toast?.({ message: `Report saved to ${filePath}`, variant: "info" })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     api.ui.toast?.({ message: `Error: ${msg}`, variant: "error" })
   }
 }
 
-async function showSettingsDialog(api: TuiPluginApi): Promise<void> {
-  const currentConfig = loadConfigFromStore(api)
-  const cfg = currentConfig.sidebar
-  const options = [
-    `[${cfg.showPerformance ? "x" : " "}] ${t("showPerformance")}`,
-    `[${cfg.showPricing ? "x" : " "}] ${t("showPricing")}`,
-    `[${cfg.showTokenDistribution ? "x" : " "}] ${t("showTokenDistribution")}`,
-    `[${cfg.showTrend ? "x" : " "}] ${t("showTrend")}`,
-    `---`,
-    `${t("language")}: ${currentConfig.language}`,
-  ].join("\n")
+function saveConfigToStore(api: TuiPluginApi, cfg: SidebarConfig): void {
+  api.kv?.set?.("tokenwatch-config", cfg)
+}
 
-  api.ui.toast?.({ message: `TokenWatch settings:\n${options}`, variant: "info" })
+let lastSelectedSetting: string | undefined
+
+function showSettingsDialog(api: TuiPluginApi, dialog?: TuiDialogStack): void {
+  if (!dialog) return
+
+  const reopen = (value: string) => {
+    lastSelectedSetting = value
+    setTimeout(() => showSettingsDialog(api, dialog), 0)
+  }
+
+  const cfg = loadConfigFromStore(api).sidebar
+
+  dialog.replace(() => (
+    <api.ui.DialogSelect
+      title="TokenWatch Settings"
+      placeholder="Toggle settings..."
+      options={[
+        {
+          title: `${cfg.showPerformance ? "✓ " : "  "}Show Performance (TPS/TPOT)`,
+          value: "showPerformance",
+          description: "Display TPS, TPOT, latency metrics in sidebar",
+          onSelect: () => { toggleSidebarSetting(api, "showPerformance"); reopen("showPerformance") },
+        },
+        {
+          title: `${cfg.showPricing ? "✓ " : "  "}Show Pricing`,
+          value: "showPricing",
+          description: "Display cost estimates in sidebar",
+          onSelect: () => { toggleSidebarSetting(api, "showPricing"); reopen("showPricing") },
+        },
+        {
+          title: `${cfg.showTokenDistribution ? "✓ " : "  "}Show Token Distribution`,
+          value: "showTokenDistribution",
+          description: "Display input/output/reasoning token breakdown in sidebar",
+          onSelect: () => { toggleSidebarSetting(api, "showTokenDistribution"); reopen("showTokenDistribution") },
+        },
+        {
+          title: `${cfg.showTrend ? "✓ " : "  "}Show Trend`,
+          value: "showTrend",
+          description: "Display token usage trend chart in sidebar",
+          onSelect: () => { toggleSidebarSetting(api, "showTrend"); reopen("showTrend") },
+        },
+        {
+          title: "Done",
+          value: "done",
+          description: "Close settings",
+          onSelect: () => { lastSelectedSetting = undefined; dialog.clear() },
+        },
+      ]}
+      flat={true}
+      current={lastSelectedSetting}
+    />
+  ))
+}
+
+function toggleSidebarSetting(api: TuiPluginApi, key: keyof SidebarConfig["sidebar"]): void {
+  const current = loadConfigFromStore(api)
+  current.sidebar[key] = !current.sidebar[key]
+  saveConfigToStore(api, current)
+  const v = (api.kv?.get?.("tokenwatch-config-version") as number ?? 0) + 1
+  api.kv?.set?.("tokenwatch-config-version", v)
 }
 
 function loadConfigFromStore(api: TuiPluginApi): SidebarConfig {

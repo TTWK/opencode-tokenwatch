@@ -8,6 +8,7 @@ function fmtTokens(n: number): string {
 }
 
 function fmtCost(n: number): string {
+  if (n === 0) return "$0.00"
   if (n < 0.01) return "$" + n.toFixed(6)
   return "$" + n.toFixed(2)
 }
@@ -52,28 +53,28 @@ function renderKpiCards(data: CombinedReportData): string {
         <div class="kpi-value" style="color:var(--cache)">${hitRatePct}</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Total Cost</div>
-        <div class="kpi-value" style="color:var(--tps)">${fmtCost(s.totalCost)}</div>
+        <div class="kpi-label">Avg TPS</div>
+        <div class="kpi-value" style="color:var(--tps)">${avgTps}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Requests</div>
         <div class="kpi-value">${s.requestCount}</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Avg TPS</div>
-        <div class="kpi-value" style="color:var(--tps)">${avgTps}</div>
+        <div class="kpi-label">Total Cost</div>
+        <div class="kpi-value" style="color:var(--tps)">${fmtCost(s.totalCost)}</div>
       </div>
     </div>`
 }
 
 function renderModelChartInit(data: CombinedReportData): string {
-  const models = sortModelsByUsage(data.models)
+  const models = sortModelsByUsage(data.models).filter(m => m.totalTokens >= 1_000_000)
   const names = models.map(m => m.model)
   const inputData = models.map(m => m.inputTokens)
   const outputData = models.map(m => m.outputTokens)
   const cacheData = models.map(m => m.cacheRead)
   const tpsData = models.map(m => {
-    const perf = data.perfSummary.find(p => p.model === m.model)
+    const perf = data.perfSummary.find(p => p.model === `${m.provider}/${m.model}`)
     return perf?.avgTPS ?? null
   })
 
@@ -82,7 +83,6 @@ var modelInput = ${JSON.stringify(inputData)};
 var modelOutput = ${JSON.stringify(outputData)};
 var modelCache = ${JSON.stringify(cacheData)};
 var modelTps = ${JSON.stringify(tpsData)};
-var currentStackMode = 'absolute';
 
 function initModelChart() {
   var el = document.getElementById('model-chart');
@@ -94,7 +94,6 @@ function initModelChart() {
 }
 
 function renderModelChart(chart) {
-  var isPercent = currentStackMode === 'percent';
   var totals = modelInput.map(function(v, i) { return v + modelOutput[i] + modelCache[i]; });
   var option = {
     tooltip: {
@@ -122,22 +121,21 @@ function renderModelChart(chart) {
       textStyle: { color: '#B0B0C0' },
       top: 5
     },
-    grid: { left: 60, right: 60, bottom: 30, top: 50 },
+    grid: { left: 60, right: 60, bottom: 100, top: 50 },
     xAxis: {
       type: 'category',
       data: modelNames,
-      axisLabel: { color: '#B0B0C0', rotate: 30, interval: 0, fontSize: 11 },
+      axisLabel: { color: '#B0B0C0', rotate: 45, interval: 0, fontSize: 10 },
       axisLine: { lineStyle: { color: '#2A2A35' } }
     },
     yAxis: [
       {
-        type: isPercent ? 'value' : 'value',
-        name: isPercent ? 'Percentage' : 'Tokens',
-        max: isPercent ? 100 : null,
+        type: 'value',
+        name: 'Tokens',
         nameTextStyle: { color: '#B0B0C0' },
         axisLabel: {
           color: '#B0B0C0',
-          formatter: isPercent ? function(v) { return v + '%'; } : fmt
+          formatter: fmt
         },
         splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
       },
@@ -153,47 +151,45 @@ function renderModelChart(chart) {
       {
         name: 'Input',
         type: 'bar',
-        stack: isPercent ? 'percent' : 'tokens',
-        data: isPercent ? modelInput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelInput,
+        stack: 'tokens',
+        data: modelInput,
         itemStyle: { color: '#00D1FF' },
-        barMaxWidth: 40,
-        label: {
-          show: isPercent,
-          position: 'inside',
-          formatter: function(p) { return p.value.toFixed(1) + '%'; },
-          color: '#fff', fontSize: 10
-        }
-      },
-      {
-        name: 'Output',
-        type: 'bar',
-        stack: isPercent ? 'percent' : 'tokens',
-        data: isPercent ? modelOutput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelOutput,
-        itemStyle: { color: '#B545FF' },
-        barMaxWidth: 40,
-        label: {
-          show: isPercent,
-          position: 'inside',
-          formatter: function(p) { return p.value.toFixed(1) + '%'; },
-          color: '#fff', fontSize: 10
-        }
+        barMaxWidth: 40
       },
       {
         name: 'Cache',
         type: 'bar',
-        stack: isPercent ? 'percent' : 'tokens',
-        data: isPercent ? modelCache.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelCache,
+        stack: 'tokens',
+        data: modelCache,
         itemStyle: { color: '#00F593' },
         barMaxWidth: 40,
         label: {
           show: true,
           position: 'inside',
           formatter: function(p) {
-            if (p.value === 0) return '';
-            var total = modelInput[p.dataIndex] + modelOutput[p.dataIndex] + modelCache[p.dataIndex];
-            return total > 0 ? (modelCache[p.dataIndex] / (modelInput[p.dataIndex] + modelCache[p.dataIndex]) * 100).toFixed(1) + '%' : '';
+            var cache = modelCache[p.dataIndex];
+            var input = modelInput[p.dataIndex];
+            if (cache === 0) return '';
+            return (cache / (input + cache) * 100).toFixed(0) + '%';
           },
-          color: '#0C0C0E', fontSize: 10, fontWeight: 'bold'
+          color: '#fff', fontSize: 10, fontWeight: 'bold'
+        }
+      },
+      {
+        name: 'Output',
+        type: 'bar',
+        stack: 'tokens',
+        data: modelOutput,
+        itemStyle: { color: '#B545FF' },
+        barMaxWidth: 40,
+        label: {
+          show: true,
+          position: 'top',
+          formatter: function(p) {
+            var total = modelInput[p.dataIndex] + modelOutput[p.dataIndex] + modelCache[p.dataIndex];
+            return total > 0 ? fmt(total) : '';
+          },
+          color: '#fff', fontSize: 10, fontWeight: 'bold'
         }
       },
       {
@@ -208,7 +204,7 @@ function renderModelChart(chart) {
         itemStyle: { color: '#FFB800' },
         label: {
           show: true,
-          position: 'top',
+          position: 'right',
           formatter: function(p) { return p.value != null ? p.value.toFixed(1) : ''; },
           color: '#FFB800', fontSize: 10
         }
@@ -217,14 +213,7 @@ function renderModelChart(chart) {
   };
   chart.setOption(option);
   chart.resize();
-}
-
-window.setStackMode = function(mode) {
-  currentStackMode = mode;
-  document.querySelectorAll('.toggle-btn').forEach(function(b) { b.classList.remove('active'); });
-  document.querySelector('[data-mode="' + mode + '"]').classList.add('active');
-  if (window.modelChart) renderModelChart(window.modelChart);
-};`
+}`
 }
 
 function renderScatterChartInit(data: CombinedReportData): string {
@@ -242,7 +231,7 @@ function renderScatterChartInit(data: CombinedReportData): string {
       name: p.model,
       provider: p.providerID,
       tps: p.avgTPS,
-      value: [p.avgTTFT ?? 0, costPer1K, p.requestCount]
+      value: [p.avgTTFT != null && p.avgTTFT > 0 ? p.avgTTFT : 0.01, costPer1K, p.requestCount]
     }
   })
 
@@ -260,17 +249,18 @@ function initScatterChart() {
       formatter: function(params) {
         var d = params.data;
         return '<b>' + params.name + '</b><br/>' +
-          'Provider: ' + (d.provider || '—') + '<br/>' +
-          'TTFT: ' + (d.value[0] != null ? d.value[0].toFixed(1) + 'ms' : '—') + '<br/>' +
-          'TPS: ' + (d.tps != null ? d.tps.toFixed(1) : '—') + '<br/>' +
+          'Provider: ' + (d.provider || '\u2014') + '<br/>' +
+          'TTFT: ' + (d.value[0] != null ? d.value[0].toFixed(1) + 'ms' : '\u2014') + '<br/>' +
+          'TPS: ' + (d.tps != null ? d.tps.toFixed(1) : '\u2014') + '<br/>' +
           'Cost/1K: $' + d.value[1].toFixed(4) + '<br/>' +
           'Requests: ' + d.value[2];
       }
     },
-    grid: { left: 70, right: 30, bottom: 40, top: 20 },
+    grid: { left: 80, right: 40, bottom: 60, top: 30 },
     xAxis: {
       type: 'log',
       name: 'TTFT (ms)',
+      min: 0.01,
       nameTextStyle: { color: '#B0B0C0' },
       axisLabel: { color: '#B0B0C0' },
       splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
@@ -346,20 +336,22 @@ function renderDataTable(data: CombinedReportData): string {
     const hitRate = cacheHitRate(m.inputTokens, m.cacheRead)
     const hitRatePct = fmtPercent(hitRate)
     const hitColor = hitRate >= 0.85 ? 'var(--cache)' : hitRate >= 0.70 ? 'var(--tps)' : 'var(--output)'
-    const perf = data.perfSummary.find(p => p.model === m.model)
+    const perf = data.perfSummary.find(p => p.model === `${m.provider}/${m.model}`)
     const ttft = perf?.avgTTFT != null ? perf.avgTTFT.toFixed(0) + 'ms' : '—'
     const tps = perf?.avgTPS != null ? perf.avgTPS.toFixed(1) : '—'
 
     return `<tr>
       <td>${m.model}</td>
+      <td>${m.provider}</td>
       <td>${m.requests}</td>
+      <td>${fmtTokens(m.totalTokens)}</td>
       <td>${fmtTokens(m.inputTokens)}</td>
       <td>${fmtTokens(m.outputTokens)}</td>
       <td>${fmtTokens(m.cacheRead)}</td>
       <td style="color:${hitColor};font-weight:600">${hitRatePct}</td>
-      <td>${fmtCost(m.totalCost)}</td>
       <td>${ttft}</td>
       <td>${tps}</td>
+      <td>${fmtCost(m.totalCost)}</td>
     </tr>`
   }).join("\n")
 
@@ -367,14 +359,16 @@ function renderDataTable(data: CombinedReportData): string {
     <thead>
       <tr>
         <th>Model</th>
+        <th>Provider</th>
         <th>Req</th>
+        <th>Total</th>
         <th>Input</th>
         <th>Output</th>
         <th>Cache</th>
         <th>Hit Rate</th>
-        <th>Cost</th>
         <th>TTFT</th>
         <th>TPS</th>
+        <th>Cost</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -412,7 +406,7 @@ function initDailyChart() {
       textStyle: { color: '#B0B0C0' },
       top: 5
     },
-    grid: { left: 60, right: 60, bottom: 60, top: 40 },
+    grid: { left: 60, right: 60, bottom: 80, top: 40 },
     xAxis: {
       type: 'category',
       data: dailyDays,
@@ -437,7 +431,7 @@ function initDailyChart() {
     ],
     dataZoom: [{
       type: 'slider',
-      bottom: 10,
+      bottom: 5,
       height: 20,
       borderColor: '#2A2A35',
       fillerColor: 'rgba(0,213,255,0.1)',
@@ -531,7 +525,8 @@ function initHeatmapChart() {
 export function generateUsageHtml(data: CombinedReportData): string {
   const metaStr = renderMeta(data)
   const kpiStr = renderKpiCards(data)
-  const modelChartJs = renderModelChartInit(data)
+  const modelChartVisible = data.models.filter(m => m.totalTokens >= 1_000_000).length > 0
+  const modelChartJs = modelChartVisible ? renderModelChartInit(data) : ""
   const scatterChartJs = renderScatterChartInit(data)
   const providerStr = renderProviderCards(data)
   const tableStr = renderDataTable(data)
@@ -598,14 +593,6 @@ export function generateUsageHtml(data: CombinedReportData): string {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 12px; height: 400px;
   }
-
-  .toggle-bar { display: flex; gap: 6px; margin-bottom: 10px; }
-  .toggle-btn {
-    background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: 'Inter', sans-serif;
-  }
-  .toggle-btn:hover { border-color: var(--input); color: var(--text); }
-  .toggle-btn.active { background: var(--input); color: var(--bg); border-color: var(--input); font-weight: 600; }
 
   .tab-bar { display: flex; gap: 4px; margin-bottom: 12px; }
   .tab-btn {
@@ -676,16 +663,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
 
   <div class="section">
     <div class="section-title">Model Comparison Matrix</div>
-    <div class="toggle-bar">
-      <button class="toggle-btn active" data-mode="absolute" onclick="window.setStackMode('absolute')">Absolute</button>
-      <button class="toggle-btn" data-mode="percent" onclick="window.setStackMode('percent')">Percent</button>
-    </div>
-    <div class="chart-box" id="model-chart"></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Efficiency vs Cost</div>
-    ${hasPerf ? '<div class="chart-box" id="scatter-chart"></div>' : '<div class="empty-state">No performance data available for this period.</div>'}
+    ${modelChartVisible ? '<div class="chart-box" id="model-chart"></div>' : '<div class="empty-state">No models with >=1M tokens in this period.</div>'}
   </div>
 
   <div class="section">
@@ -696,6 +674,11 @@ export function generateUsageHtml(data: CombinedReportData): string {
   <div class="section">
     <div class="section-title">Detailed Data Grid</div>
     ${tableStr}
+  </div>
+
+  <div class="section">
+    <div class="section-title">Efficiency vs Cost</div>
+    ${hasPerf ? '<div class="chart-box" id="scatter-chart"></div>' : '<div class="empty-state">No performance data available for this period.</div>'}
   </div>
 
   <div class="section">
@@ -713,7 +696,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   </div>
 
     <div class="footer">
-      Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="#" onclick="var d=document.getElementById('report-data');var b=new Blob([d.textContent],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tokenwatch-data.json';a.click();return false" style="color:var(--input);text-decoration:none">JSON</a>
+      Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="javascript:void(0)" onclick="downloadJSON()" style="color:var(--input);text-decoration:none">JSON</a> <span style="color:var(--text-dim)">(saves to browser download folder)</span>
     </div>
 </div>
 
@@ -744,15 +727,28 @@ ${scatterChartJs}
 ${dailyChartJs}
 ${heatmapJs}
 
+window.downloadJSON = function() {
+  var d = document.getElementById('report-data');
+  if (!d) return;
+  var b = new Blob([d.textContent], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(b);
+  a.download = 'tokenwatch-data.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function() { URL.revokeObjectURL(a.href); }, 100);
+};
+
 document.addEventListener('DOMContentLoaded', function() {
-  initModelChart();
+  ${modelChartVisible ? 'initModelChart();' : ''}
   ${hasPerf ? 'initScatterChart();' : ''}
   initDailyChart();
   initHeatmapChart();
 });
 
 window.addEventListener('resize', function() {
-  if (window.modelChart) window.modelChart.resize();
+  ${modelChartVisible ? 'if (window.modelChart) window.modelChart.resize();' : ''}
   if (window.scatterChart) window.scatterChart.resize();
   if (window.dailyChart) window.dailyChart.resize();
   if (window.heatmapChart) window.heatmapChart.resize();

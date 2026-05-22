@@ -4,6 +4,7 @@ import { RGBA } from "@opentui/core"
 import { formatTokens, formatCost, formatDuration } from "./formatter.js"
 import { t, setLanguage } from "./i18n.js"
 import type { PerfTracker } from "./perf-tracker.js"
+import type { TokenMessage } from "./tui.jsx"
 
 export interface SidebarConfig {
   sidebar: {
@@ -93,12 +94,25 @@ interface TokenWatchPanelProps {
   theme: TuiTheme
   perfTracker: PerfTracker
   messages: readonly any[]
+  allTokenMessages: TokenMessage[]
 }
 
 export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const { api, theme, perfTracker } = props
   const getMessages = () => props.messages
-  const [config] = createSignal<SidebarConfig>(loadConfig(api))
+  const [config, setConfig] = createSignal<SidebarConfig>(loadConfig(api))
+  let knownCfgVer = api.kv?.get?.("tokenwatch-config-version") as number | undefined
+
+  createEffect(() => {
+    const timer = setInterval(() => {
+      const v = api.kv?.get?.("tokenwatch-config-version") as number | undefined
+      if (v != null && v !== knownCfgVer) {
+        knownCfgVer = v
+        setConfig(loadConfig(api))
+      }
+    }, 500)
+    onCleanup(() => clearInterval(timer))
+  })
   const [collapse, setCollapse] = createSignal<CollapseState>(loadCollapseState(api))
   const [panelWidth, setPanelWidth] = createSignal(40)
 
@@ -110,22 +124,18 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
   const modelStats = createMemo(() => {
     const map = new Map<string, ModelAgg>()
-    for (const msg of getMessages()) {
-      if ((msg as any).role !== "assistant") continue
-      const providerID = (msg as any).providerID ?? "unknown"
-      const modelID = (msg as any).modelID ?? "unknown"
-      const key = `${providerID}/${modelID}`
-      const tokens = (msg as any).tokens ?? {}
+    for (const msg of props.allTokenMessages) {
+      const key = `${msg.providerID}/${msg.modelID}`
       let e = map.get(key)
       if (!e) {
-        e = { providerID, modelID, totalInput: 0, totalOutput: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0 }
+        e = { providerID: msg.providerID, modelID: msg.modelID, totalInput: 0, totalOutput: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0 }
         map.set(key, e)
       }
-      e.totalInput += tokens.input ?? 0
-      e.totalOutput += tokens.output ?? 0
-      e.cacheRead += tokens.cache?.read ?? 0
-      e.cacheWrite += tokens.cache?.write ?? 0
-      e.totalCost += (msg as any).cost ?? 0
+      e.totalInput += msg.inputTokens
+      e.totalOutput += msg.outputTokens
+      e.cacheRead += msg.cacheRead
+      e.cacheWrite += msg.cacheWrite
+      e.totalCost += msg.cost
       e.requestCount++
     }
     return Array.from(map.entries()).sort((a, b) => (b[1].totalInput + b[1].totalOutput) - (a[1].totalInput + a[1].totalOutput))
@@ -140,12 +150,11 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const modelHitRate = createMemo(() => {
     return modelStats().map(([key, stat]) => {
       const denom = stat.totalInput + stat.cacheRead
-      if (denom === 0) return { key, rate: 0, msgs: [] as any[] }
+      if (denom === 0) return { key, rate: 0, msgs: [] as TokenMessage[] }
 
-      const msgs: any[] = []
-      for (const msg of getMessages()) {
-        if ((msg as any).role !== "assistant") continue
-        const pk = `${(msg as any).providerID ?? "unknown"}/${(msg as any).modelID ?? "unknown"}`
+      const msgs: TokenMessage[] = []
+      for (const msg of props.allTokenMessages) {
+        const pk = `${msg.providerID}/${msg.modelID}`
         if (pk !== key) continue
         msgs.push(msg)
       }
@@ -161,9 +170,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
       const sumSlice = (start: number, end: number) => {
         let sumCache = 0, sumTotal = 0
         for (let i = start; i < end && i < msgs.length; i++) {
-          const tokens = (msgs[i] as any).tokens ?? {}
-          const input = tokens.input ?? 0
-          const cache = tokens.cache?.read ?? 0
+          const input = msgs[i].inputTokens
+          const cache = msgs[i].cacheRead
           sumCache += cache
           sumTotal += input + cache
         }

@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenWatch Usage Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #0C0C0E;
+    --card: #16161A;
+    --border: #2A2A35;
+    --text: #E0E0F0;
+    --text-dim: #B0B0C0;
+    --cache: #00F593;
+    --input: #00D1FF;
+    --output: #B545FF;
+    --tps: #FFB800;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px;
+  }
+  .header h1 { font-size: 22px; font-weight: 600; color: var(--text); }
+  .header h1 span { color: var(--input); }
+  .header .meta { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  .kpi-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; text-align: center;
+  }
+  .kpi-card.kpi-glow { box-shadow: 0 0 20px rgba(0,245,147,0.15); border-color: var(--cache); }
+  .kpi-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .kpi-value { font-size: 26px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text); }
+
+  .section { margin-bottom: 28px; }
+  .section-title {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .chart-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; height: 400px;
+  }
+
+  .toggle-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+  .toggle-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: 'Inter', sans-serif;
+  }
+  .toggle-btn:hover { border-color: var(--input); color: var(--text); }
+  .toggle-btn.active { background: var(--input); color: var(--bg); border-color: var(--input); font-weight: 600; }
+
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 6px 18px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 13px; font-family: 'Inter', sans-serif;
+  }
+  .tab-btn:hover { border-color: var(--input); color: var(--text); }
+  .tab-btn.active {
+    background: var(--border); color: var(--text); border-bottom-color: var(--border);
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .provider-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .provider-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px;
+  }
+  .provider-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--input); }
+  .provider-stat { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+  .provider-stat .stat-label { color: var(--text-dim); }
+
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th {
+    background: var(--card); color: var(--text-dim); padding: 8px 10px;
+    text-align: right; border-bottom: 1px solid var(--border); font-weight: 500;
+    white-space: nowrap;
+  }
+  .data-table th:first-child { text-align: left; }
+  .data-table td {
+    padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .data-table td:first-child {
+    text-align: left; color: var(--text); font-family: 'Inter', sans-serif;
+  }
+  .data-table tbody tr:hover { background: rgba(42,42,53,0.4); }
+
+  .empty-state {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 40px; text-align: center; color: var(--text-dim);
+  }
+
+  .footer {
+    margin-top: 40px; padding: 16px 0; border-top: 1px solid var(--border);
+    text-align: center; font-size: 11px; color: var(--text-dim);
+  }
+
+  @media (max-width: 768px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .provider-row { grid-template-columns: 1fr; }
+    .container { padding: 12px 10px; }
+    .header { flex-direction: column; gap: 6px; align-items: flex-start; }
+    .chart-box { height: 300px; }
+    .data-table { font-size: 11px; }
+    .data-table th, .data-table td { padding: 4px 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1><span>TokenWatch</span> Usage Report</h1>
+    <div class="meta">TokenWatch Usage Report · 2026-02-27 → 2026-05-18 · generated 2026-05-22 14:00:00</div>
+  </div>
+
+  
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Tokens</div>
+        <div class="kpi-value">132.5M</div>
+      </div>
+      <div class="kpi-card kpi-glow">
+        <div class="kpi-label">Cache Hit Rate</div>
+        <div class="kpi-value" style="color:var(--cache)">85.9%</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Cost</div>
+        <div class="kpi-value" style="color:var(--tps)">$2.94</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Requests</div>
+        <div class="kpi-value">1688</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg TPS</div>
+        <div class="kpi-value" style="color:var(--tps)">42.2</div>
+      </div>
+    </div>
+
+  <div class="section">
+    <div class="section-title">Model Comparison Matrix</div>
+    <div class="toggle-bar">
+      <button class="toggle-btn active" data-mode="absolute" onclick="window.setStackMode('absolute')">Absolute</button>
+      <button class="toggle-btn" data-mode="percent" onclick="window.setStackMode('percent')">Percent</button>
+    </div>
+    <div class="chart-box" id="model-chart"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Efficiency vs Cost</div>
+    <div class="chart-box" id="scatter-chart"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Provider Summary</div>
+    <div class="provider-row">
+    <div class="provider-card" style="border-color:#00F593">
+      <div class="provider-name">opencode</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>110.4M</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>$0.000000</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>377ms</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>46.3</span></div>
+      <div class="provider-stat"><span class="stat-label">Models</span><span>4</span></div>
+    </div>
+
+    <div class="provider-card" style="border-color:#00D1FF">
+      <div class="provider-name">deepseek</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>7.4M</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>$2.36</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>820ms</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>28.5</span></div>
+      <div class="provider-stat"><span class="stat-label">Models</span><span>1</span></div>
+    </div>
+
+    <div class="provider-card" style="border-color:#FFB800">
+      <div class="provider-name">modelscope</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>6.9M</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>$0.000000</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>—</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>—</span></div>
+      <div class="provider-stat"><span class="stat-label">Models</span><span>2</span></div>
+    </div>
+
+    <div class="provider-card" style="border-color:#B545FF">
+      <div class="provider-name">nvidia</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>6.9M</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>$0.59</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>1200ms</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>15.2</span></div>
+      <div class="provider-stat"><span class="stat-label">Models</span><span>4</span></div>
+    </div>
+
+    <div class="provider-card" style="border-color:#2A2A35">
+      <div class="provider-name">huoshan_fangzhou</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>819.2K</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>$0.000000</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>—</span></div>
+      <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>—</span></div>
+      <div class="provider-stat"><span class="stat-label">Models</span><span>1</span></div>
+    </div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Detailed Data Grid</div>
+    <table class="data-table">
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th>Req</th>
+        <th>Input</th>
+        <th>Output</th>
+        <th>Cache</th>
+        <th>Hit Rate</th>
+        <th>Cost</th>
+        <th>TTFT</th>
+        <th>TPS</th>
+      </tr>
+    </thead>
+    <tbody><tr>
+      <td>deepseek-v4-flash-free</td>
+      <td>669</td>
+      <td>1.5M</td>
+      <td>199.1K</td>
+      <td>57.6M</td>
+      <td style="color:var(--cache);font-weight:600">97.5%</td>
+      <td>$0.000000</td>
+      <td>320ms</td>
+      <td>52.3</td>
+    </tr>
+<tr>
+      <td>mimo-v2-pro-free</td>
+      <td>523</td>
+      <td>1.9M</td>
+      <td>185.9K</td>
+      <td>46.0M</td>
+      <td style="color:var(--cache);font-weight:600">95.9%</td>
+      <td>$0.000000</td>
+      <td>450ms</td>
+      <td>38.7</td>
+    </tr>
+<tr>
+      <td>deepseek-v4-pro</td>
+      <td>107</td>
+      <td>489.1K</td>
+      <td>110.8K</td>
+      <td>6.8M</td>
+      <td style="color:var(--cache);font-weight:600">93.3%</td>
+      <td>$2.36</td>
+      <td>820ms</td>
+      <td>28.5</td>
+    </tr>
+<tr>
+      <td>z-ai/glm-5.1</td>
+      <td>129</td>
+      <td>6.0M</td>
+      <td>21.6K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>1200ms</td>
+      <td>15.2</td>
+    </tr>
+<tr>
+      <td>ZhipuAI/GLM-5</td>
+      <td>124</td>
+      <td>4.8M</td>
+      <td>45.2K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>qwen3.6-plus-free</td>
+      <td>38</td>
+      <td>228</td>
+      <td>18.0K</td>
+      <td>2.3M</td>
+      <td style="color:var(--cache);font-weight:600">100.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>deepseek-ai/DeepSeek-V4-Pro</td>
+      <td>27</td>
+      <td>2.1M</td>
+      <td>13.5K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>kimi-k2.5</td>
+      <td>29</td>
+      <td>774.6K</td>
+      <td>44.6K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>z-ai/glm5</td>
+      <td>19</td>
+      <td>503.3K</td>
+      <td>2.7K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>deepseek-ai/deepseek-v4-pro</td>
+      <td>14</td>
+      <td>332.8K</td>
+      <td>2.9K</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.59</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>minimax-m2.5-free</td>
+      <td>7</td>
+      <td>14.1K</td>
+      <td>1.8K</td>
+      <td>127.7K</td>
+      <td style="color:var(--cache);font-weight:600">90.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td>minimaxai/minimax-m2.7</td>
+      <td>2</td>
+      <td>28.6K</td>
+      <td>139</td>
+      <td>0</td>
+      <td style="color:var(--output);font-weight:600">0.0%</td>
+      <td>$0.000000</td>
+      <td>—</td>
+      <td>—</td>
+    </tr></tbody>
+  </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Usage Timeline</div>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="daily" onclick="switchTab('daily')">Daily Trend</button>
+      <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>
+    </div>
+    <div id="tab-daily" class="tab-content active">
+      <div class="chart-box" id="daily-chart"></div>
+    </div>
+    <div id="tab-heatmap" class="tab-content">
+      <div class="chart-box" id="heatmap-chart"></div>
+    </div>
+  </div>
+
+    <div class="footer">
+      Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="#" onclick="var d=document.getElementById('report-data');var b=new Blob([d.textContent],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tokenwatch-data.json';a.click();return false" style="color:var(--input);text-decoration:none">JSON</a>
+    </div>
+</div>
+
+<script id="report-data" type="application/json">{"filters":{"provider":"","model":"","limit":60},"summary":{"model":"","provider":"","modelsUsed":["minimax-m2.5-free","kimi-k2.5","ZhipuAI/GLM-5","mimo-v2-pro-free","z-ai/glm5","minimaxai/minimax-m2.7","z-ai/glm-5.1","deepseek-v4-pro","deepseek-ai/DeepSeek-V4-Pro","deepseek-ai/deepseek-v4-pro","deepseek-v4-flash-free","qwen3.6-plus-free"],"totalTokens":132501956,"inputTokens":18461932,"outputTokens":646357,"reasoningTokens":316161,"cacheRead":112736731,"cacheWrite":402923,"totalCost":2.94435086,"requestCount":1688},"models":[{"provider":"opencode","model":"deepseek-v4-flash-free","requests":669,"sessions":10,"totalTokens":59426132,"inputTokens":1457766,"outputTokens":199117,"reasoningTokens":214177,"cacheRead":57555072,"totalCost":0},{"provider":"opencode","model":"mimo-v2-pro-free","requests":523,"sessions":12,"totalTokens":48141294,"inputTokens":1943645,"outputTokens":185873,"reasoningTokens":22535,"cacheRead":46011776,"totalCost":0},{"provider":"deepseek","model":"deepseek-v4-pro","requests":107,"sessions":10,"totalTokens":7396732,"inputTokens":489109,"outputTokens":110795,"reasoningTokens":39836,"cacheRead":6756992,"totalCost":2.35500938},{"provider":"nvidia","model":"z-ai/glm-5.1","requests":129,"sessions":5,"totalTokens":6051857,"inputTokens":6030236,"outputTokens":21621,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"provider":"modelscope","model":"ZhipuAI/GLM-5","requests":124,"sessions":9,"totalTokens":4850855,"inputTokens":4805631,"outputTokens":45224,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"provider":"opencode","model":"qwen3.6-plus-free","requests":38,"sessions":1,"totalTokens":2676845,"inputTokens":228,"outputTokens":17990,"reasoningTokens":0,"cacheRead":2285203,"totalCost":0},{"provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":27,"sessions":6,"totalTokens":2095353,"inputTokens":2081862,"outputTokens":13491,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"provider":"huoshan_fangzhou","model":"kimi-k2.5","requests":29,"sessions":4,"totalTokens":819235,"inputTokens":774605,"outputTokens":44630,"reasoningTokens":39613,"cacheRead":0,"totalCost":0},{"provider":"nvidia","model":"z-ai/glm5","requests":19,"sessions":2,"totalTokens":505958,"inputTokens":503260,"outputTokens":2698,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro","requests":14,"sessions":1,"totalTokens":335770,"inputTokens":332838,"outputTokens":2932,"reasoningTokens":0,"cacheRead":0,"totalCost":0.58934148},{"provider":"opencode","model":"minimax-m2.5-free","requests":7,"sessions":1,"totalTokens":173166,"inputTokens":14132,"outputTokens":1847,"reasoningTokens":0,"cacheRead":127688,"totalCost":0},{"provider":"nvidia","model":"minimaxai/minimax-m2.7","requests":2,"sessions":1,"totalTokens":28759,"inputTokens":28620,"outputTokens":139,"reasoningTokens":0,"cacheRead":0,"totalCost":0}],"providers":[{"provider":"opencode","requests":1237,"sessions":23,"totalTokens":110417437,"inputTokens":3415771,"outputTokens":404827,"reasoningTokens":236712,"cacheRead":105979739,"totalCost":0},{"provider":"deepseek","requests":107,"sessions":10,"totalTokens":7396732,"inputTokens":489109,"outputTokens":110795,"reasoningTokens":39836,"cacheRead":6756992,"totalCost":2.35500938},{"provider":"modelscope","requests":151,"sessions":15,"totalTokens":6946208,"inputTokens":6887493,"outputTokens":58715,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"provider":"nvidia","requests":164,"sessions":8,"totalTokens":6922344,"inputTokens":6894954,"outputTokens":27390,"reasoningTokens":0,"cacheRead":0,"totalCost":0.58934148},{"provider":"huoshan_fangzhou","requests":29,"sessions":4,"totalTokens":819235,"inputTokens":774605,"outputTokens":44630,"reasoningTokens":39613,"cacheRead":0,"totalCost":0}],"daily":[{"day":"2026-05-18","requests":38,"sessions":1,"totalTokens":2676845,"inputTokens":228,"outputTokens":17990,"reasoningTokens":0,"cacheRead":2285203,"totalCost":0},{"day":"2026-05-15","requests":219,"sessions":8,"totalTokens":17482376,"inputTokens":2777264,"outputTokens":79303,"reasoningTokens":81681,"cacheRead":14544128,"totalCost":0.91305572},{"day":"2026-05-14","requests":212,"sessions":5,"totalTokens":20005809,"inputTokens":345640,"outputTokens":58401,"reasoningTokens":79208,"cacheRead":19522560,"totalCost":0},{"day":"2026-05-13","requests":312,"sessions":6,"totalTokens":26638026,"inputTokens":600860,"outputTokens":91708,"reasoningTokens":80370,"cacheRead":25865088,"totalCost":0},{"day":"2026-05-06","requests":104,"sessions":2,"totalTokens":5628262,"inputTokens":5612058,"outputTokens":16204,"reasoningTokens":0,"cacheRead":0,"totalCost":0.58934148},{"day":"2026-04-28","requests":58,"sessions":8,"totalTokens":4737862,"inputTokens":251463,"outputTokens":93357,"reasoningTokens":12754,"cacheRead":4380288,"totalCost":1.44195366},{"day":"2026-04-24","requests":22,"sessions":2,"totalTokens":380380,"inputTokens":374793,"outputTokens":5587,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-04-22","requests":11,"sessions":1,"totalTokens":303777,"inputTokens":300933,"outputTokens":2844,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-04-20","requests":13,"sessions":2,"totalTokens":244998,"inputTokens":243639,"outputTokens":1359,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-04-17","requests":14,"sessions":1,"totalTokens":271374,"inputTokens":269382,"outputTokens":1992,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-04-10","requests":2,"sessions":1,"totalTokens":147697,"inputTokens":147659,"outputTokens":38,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-04-02","requests":14,"sessions":1,"totalTokens":237690,"inputTokens":234990,"outputTokens":2700,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-03-31","requests":53,"sessions":3,"totalTokens":1973187,"inputTokens":262601,"outputTokens":10170,"reasoningTokens":3631,"cacheRead":1700416,"totalCost":0},{"day":"2026-03-27","requests":72,"sessions":1,"totalTokens":7651671,"inputTokens":297959,"outputTokens":50544,"reasoningTokens":2898,"cacheRead":7303168,"totalCost":0},{"day":"2026-03-20","requests":369,"sessions":5,"totalTokens":37297249,"inputTokens":1154912,"outputTokens":113153,"reasoningTokens":14911,"cacheRead":36029184,"totalCost":0},{"day":"2026-03-19","requests":33,"sessions":4,"totalTokens":1304499,"inputTokens":312621,"outputTokens":12870,"reasoningTokens":1095,"cacheRead":979008,"totalCost":0},{"day":"2026-03-18","requests":78,"sessions":5,"totalTokens":2953472,"inputTokens":2924121,"outputTokens":29351,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-03-13","requests":4,"sessions":1,"totalTokens":87251,"inputTokens":85338,"outputTokens":1913,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-03-11","requests":24,"sessions":1,"totalTokens":1487130,"inputTokens":1476734,"outputTokens":10396,"reasoningTokens":0,"cacheRead":0,"totalCost":0},{"day":"2026-02-28","requests":20,"sessions":2,"totalTokens":656054,"inputTokens":614128,"outputTokens":41926,"reasoningTokens":38380,"cacheRead":0,"totalCost":0},{"day":"2026-02-27","requests":16,"sessions":3,"totalTokens":336347,"inputTokens":174609,"outputTokens":4551,"reasoningTokens":1233,"cacheRead":127688,"totalCost":0}],"sessions":[{"sessionId":"ses_1d6403ad3ffeRth4qPLyud9KHB","title":"发布项目到npm步骤清单","provider":"opencode","model":"qwen3.6-plus-free","requests":168,"totalTokens":13591043,"inputTokens":300153,"outputTokens":49798,"reasoningTokens":42305,"cacheRead":12825363,"totalCost":0,"day":"2026-05-18"},{"sessionId":"ses_1e0e8a0dfffeUACwxo9zCHgsrq","title":"好的，我先来阅读这些文件，了解系统功能和需求。让我先看看当前目录下有哪些文件。","provider":"opencode","model":"deepseek-v4-flash-free","requests":63,"totalTokens":5525798,"inputTokens":267105,"outputTokens":57208,"reasoningTokens":11085,"cacheRead":5190400,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1dfdddcf7ffe1hs5jtmwDXRWuF","title":"New session - 2026-05-13T06:59:28.648Z","provider":"opencode","model":"deepseek-v4-flash-free","requests":296,"totalTokens":31648850,"inputTokens":469790,"outputTokens":60124,"reasoningTokens":120664,"cacheRead":30998272,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1dfdddcf7ffe1hs5jtmwDXRWuF","title":"New session - 2026-05-13T06:59:28.648Z","provider":"deepseek","model":"deepseek-v4-pro","requests":40,"totalTokens":2417526,"inputTokens":185236,"outputTokens":11997,"reasoningTokens":25861,"cacheRead":2194432,"totalCost":0.77224912,"day":"2026-05-15"},{"sessionId":"ses_1d65833b1ffeRyRv5CDJHcghzk","title":"Find OpenTUI API types (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":9,"totalTokens":241344,"inputTokens":52410,"outputTokens":5441,"reasoningTokens":1221,"cacheRead":182272,"totalCost":0.1408066,"day":"2026-05-15"},{"sessionId":"ses_1d6ae6f30ffeLKsLkaowBseBPk","title":"Usage inquiry","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":4,"totalTokens":71305,"inputTokens":70083,"outputTokens":1222,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1d6ae4fc8ffeJCFYMAKAQYqpto","title":"Explore project structure (@explore subagent)","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":5,"totalTokens":91474,"inputTokens":88530,"outputTokens":2944,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1d6b09ba1ffe0KHEs5mNnXywss","title":"Usage check","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":5,"totalTokens":106830,"inputTokens":105762,"outputTokens":1068,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1dfdddcf7ffe1hs5jtmwDXRWuF","title":"New session - 2026-05-13T06:59:28.648Z","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":10,"totalTokens":1756795,"inputTokens":1749509,"outputTokens":7286,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1d6ddd6aaffe5Pax20D1pLi7Sj","title":"Usage query","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":1,"totalTokens":14805,"inputTokens":14468,"outputTokens":337,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-15"},{"sessionId":"ses_1da5b8c83ffeccKky96DCBw7pt","title":"Explore opencode plugin types (@explore subagent)","provider":"opencode","model":"deepseek-v4-flash-free","requests":9,"totalTokens":193455,"inputTokens":28821,"outputTokens":9828,"reasoningTokens":310,"cacheRead":154496,"totalCost":0,"day":"2026-05-14"},{"sessionId":"ses_1da5c927bffeTpW4x86SqIjK64","title":"Explore opencode-throughput src (@explore subagent)","provider":"opencode","model":"deepseek-v4-flash-free","requests":4,"totalTokens":53140,"inputTokens":16482,"outputTokens":5396,"reasoningTokens":286,"cacheRead":30976,"totalCost":0,"day":"2026-05-14"},{"sessionId":"ses_1db6ae646ffe1IIZoELW7t5uF7","title":"Docker Desktop项目部署与使用","provider":"opencode","model":"deepseek-v4-flash-free","requests":77,"totalTokens":4879658,"inputTokens":93796,"outputTokens":13200,"reasoningTokens":15286,"cacheRead":4757376,"totalCost":0,"day":"2026-05-14"},{"sessionId":"ses_1df8e3db4ffePOI86i9EYPXZpb","title":"问候","provider":"opencode","model":"deepseek-v4-flash-free","requests":13,"totalTokens":848243,"inputTokens":116243,"outputTokens":3410,"reasoningTokens":1678,"cacheRead":726912,"totalCost":0,"day":"2026-05-13"},{"sessionId":"ses_1df99665effeG3k97UMm4qTrTf","title":"Model usage and cost summary","provider":"opencode","model":"deepseek-v4-flash-free","requests":8,"totalTokens":182820,"inputTokens":49881,"outputTokens":656,"reasoningTokens":1211,"cacheRead":131072,"totalCost":0,"day":"2026-05-13"},{"sessionId":"ses_1e0d0abfeffeOYAgT0AwmUQO1O","title":"New session - 2026-05-13T02:34:15.937Z","provider":"opencode","model":"deepseek-v4-flash-free","requests":68,"totalTokens":5163974,"inputTokens":99877,"outputTokens":17440,"reasoningTokens":21249,"cacheRead":5025408,"totalCost":0,"day":"2026-05-13"},{"sessionId":"ses_1e0bc7861ffeKKH7Il3SGMZo3L","title":"Opencode usage statistics","provider":"opencode","model":"deepseek-v4-flash-free","requests":1,"totalTokens":15996,"inputTokens":15846,"outputTokens":47,"reasoningTokens":103,"cacheRead":0,"totalCost":0,"day":"2026-05-13"},{"sessionId":"ses_20390789cffeJtyxBBRtYIkSiH","title":"修复浏览器最小化自动跳出问题","provider":"nvidia","model":"z-ai/glm-5.1","requests":88,"totalTokens":5238348,"inputTokens":5225710,"outputTokens":12638,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-06"},{"sessionId":"ses_203f65bfeffewDciuSrnPZsV24","title":"New session - 2026-05-06T06:46:23.489Z","provider":"modelscope","model":"deepseek-ai/DeepSeek-V4-Pro","requests":2,"totalTokens":54144,"inputTokens":53510,"outputTokens":634,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-05-06"},{"sessionId":"ses_203f65bfeffewDciuSrnPZsV24","title":"New session - 2026-05-06T06:46:23.489Z","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro","requests":14,"totalTokens":335770,"inputTokens":332838,"outputTokens":2932,"reasoningTokens":0,"cacheRead":0,"totalCost":0.58934148,"day":"2026-05-06"},{"sessionId":"ses_22df8afdfffeHbaJkCc7FbNTnq","title":"排查项目逻辑与页面布局bug","provider":"deepseek","model":"deepseek-v4-pro","requests":40,"totalTokens":4420698,"inputTokens":121375,"outputTokens":12733,"reasoningTokens":12158,"cacheRead":4274432,"totalCost":0.91760582,"day":"2026-04-28"},{"sessionId":"ses_22df2584affeZBzIvCa7lc6HzO","title":"Read type definitions (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":3,"totalTokens":54209,"inputTokens":19148,"outputTokens":15903,"reasoningTokens":86,"cacheRead":19072,"totalCost":0.09172468,"day":"2026-04-28"},{"sessionId":"ses_22df263dbffeKfdqjS2JOajIpt","title":"Read utility and config files (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":2,"totalTokens":47758,"inputTokens":19593,"outputTokens":15688,"reasoningTokens":61,"cacheRead":12416,"totalCost":0.09069866,"day":"2026-04-28"},{"sessionId":"ses_22df2777effekjTUDj30931bhG","title":"Read all Vue components (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":2,"totalTokens":41828,"inputTokens":27061,"outputTokens":2177,"reasoningTokens":46,"cacheRead":12544,"totalCost":0.05664106,"day":"2026-04-28"},{"sessionId":"ses_22df28fcbffesyRoio7EfdxChu","title":"Read all page Vue files (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":2,"totalTokens":87224,"inputTokens":41856,"outputTokens":32754,"reasoningTokens":70,"cacheRead":12544,"totalCost":0.18887584000000002,"day":"2026-04-28"},{"sessionId":"ses_22df80442ffeMvAXhQ64cvf91X","title":"Explore stores and utils (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":3,"totalTokens":45981,"inputTokens":15342,"outputTokens":12265,"reasoningTokens":70,"cacheRead":18304,"totalCost":0.07227496,"day":"2026-04-28"},{"sessionId":"ses_22df81827ffeeU2n96hi1ZRTy4","title":"Explore pages structure (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":3,"totalTokens":19805,"inputTokens":6483,"outputTokens":921,"reasoningTokens":113,"cacheRead":12288,"totalCost":0.016660499999999998,"day":"2026-04-28"},{"sessionId":"ses_22df80e86ffeZ4xnBugupB8kJO","title":"Explore components structure (@explore subagent)","provider":"deepseek","model":"deepseek-v4-pro","requests":3,"totalTokens":20359,"inputTokens":605,"outputTokens":916,"reasoningTokens":150,"cacheRead":18688,"totalCost":0.00747214,"day":"2026-04-28"},{"sessionId":"ses_241c31228ffedtOB8aSIDLwXo8","title":"WeChat Mini Program timeout error","provider":"nvidia","model":"z-ai/glm-5.1","requests":14,"totalTokens":274655,"inputTokens":272595,"outputTokens":2060,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-24"},{"sessionId":"ses_241ad59f5ffemvn5UA6j95s0Z2","title":"Explore marker/form page (@explore subagent)","provider":"nvidia","model":"z-ai/glm-5.1","requests":8,"totalTokens":105725,"inputTokens":102198,"outputTokens":3527,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-24"},{"sessionId":"ses_24cc97a84ffeAED9StHnRZDR4i","title":"旅行规划文档增加待完成功能","provider":"nvidia","model":"z-ai/glm-5.1","requests":11,"totalTokens":303777,"inputTokens":300933,"outputTokens":2844,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-22"},{"sessionId":"ses_2561a7462ffe19zpBitXlY6QE3","title":"Vite sass 依赖安装","provider":"nvidia","model":"z-ai/glm-5.1","requests":10,"totalTokens":158111,"inputTokens":157420,"outputTokens":691,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-20"},{"sessionId":"ses_2673e77f9ffenmaNqWZ0olkJTv","title":"过敏食物台账表格设计方案讨论","provider":"nvidia","model":"z-ai/glm5","requests":17,"totalTokens":358261,"inputTokens":355601,"outputTokens":2660,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-20"},{"sessionId":"ses_2be616b9affePMfzG1l2i5To8V","title":"New session - 2026-03-31T02:00:04.966Z","provider":"nvidia","model":"z-ai/glm5","requests":2,"totalTokens":147697,"inputTokens":147659,"outputTokens":38,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-10"},{"sessionId":"ses_2b315d1cfffeh8nvfk3Bba1BSE","title":"修改 Git 用户名并覆盖提交记录","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":14,"totalTokens":237690,"inputTokens":234990,"outputTokens":2700,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-04-02"},{"sessionId":"ses_2be616b9affePMfzG1l2i5To8V","title":"New session - 2026-03-31T02:00:04.966Z","provider":"opencode","model":"mimo-v2-pro-free","requests":30,"totalTokens":1535745,"inputTokens":210414,"outputTokens":3219,"reasoningTokens":1150,"cacheRead":1322112,"totalCost":0,"day":"2026-03-31"},{"sessionId":"ses_2be62df80ffe99jEALbXg3waOz","title":"Policy detail modules hidden when fields empty (msjx)","provider":"opencode","model":"mimo-v2-pro-free","requests":6,"totalTokens":150142,"inputTokens":27568,"outputTokens":2766,"reasoningTokens":829,"cacheRead":119808,"totalCost":0,"day":"2026-03-31"},{"sessionId":"ses_2be62be54ffewfPBhk2jbOcIV2","title":"探索 msjx detail 页面 (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":17,"totalTokens":287300,"inputTokens":24619,"outputTokens":4185,"reasoningTokens":1652,"cacheRead":258496,"totalCost":0,"day":"2026-03-31"},{"sessionId":"ses_2d2f9c68dffehRJt5y7n3djpkx","title":"MSJX前端代码优化意见与方案讨论","provider":"opencode","model":"mimo-v2-pro-free","requests":72,"totalTokens":7651671,"inputTokens":297959,"outputTokens":50544,"reasoningTokens":2898,"cacheRead":7303168,"totalCost":0,"day":"2026-03-27"},{"sessionId":"ses_2f72d340cffe8NERN9pBVC7BWJ","title":"Frontend i18n toggle plan for msjx:多语言切换与开启变量","provider":"opencode","model":"mimo-v2-pro-free","requests":232,"totalTokens":31439204,"inputTokens":931628,"outputTokens":93816,"reasoningTokens":8715,"cacheRead":30413760,"totalCost":0,"day":"2026-03-20"},{"sessionId":"ses_2f71f66d2ffeylmb2xwtX9Wt0n","title":"列出所有 msjx 视图文件 (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":11,"totalTokens":151055,"inputTokens":12909,"outputTokens":3746,"reasoningTokens":1548,"cacheRead":134400,"totalCost":0,"day":"2026-03-20"},{"sessionId":"ses_2f7255f49ffe849xIZDE5rGVlk","title":"查看用户身份判断逻辑 (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":42,"totalTokens":1929680,"inputTokens":66257,"outputTokens":5055,"reasoningTokens":1811,"cacheRead":1858368,"totalCost":0,"day":"2026-03-20"},{"sessionId":"ses_2f727add2ffeWAXLN553S4N2eA","title":"深入探索实现细节 (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":24,"totalTokens":717053,"inputTokens":48357,"outputTokens":3736,"reasoningTokens":1462,"cacheRead":664960,"totalCost":0,"day":"2026-03-20"},{"sessionId":"ses_2f72d1207ffeg9XodsyFYhTMFE","title":"探索 msjx 和 i18n 结构 (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":60,"totalTokens":3060257,"inputTokens":95761,"outputTokens":6800,"reasoningTokens":1375,"cacheRead":2957696,"totalCost":0,"day":"2026-03-20"},{"sessionId":"ses_2fac4a9e2ffei53cGuQfJdITUH","title":"Msjx detail page: type 01 check and conditional consent入口 with link navigation","provider":"opencode","model":"mimo-v2-pro-free","requests":11,"totalTokens":316961,"inputTokens":61103,"outputTokens":2354,"reasoningTokens":641,"cacheRead":253504,"totalCost":0,"day":"2026-03-19"},{"sessionId":"ses_2fb2c6ae4ffeWODrK5uT9fox0B","title":"Reading msjx project: code optimization plan","provider":"opencode","model":"mimo-v2-pro-free","requests":7,"totalTokens":278746,"inputTokens":73483,"outputTokens":2639,"reasoningTokens":226,"cacheRead":202624,"totalCost":0,"day":"2026-03-19"},{"sessionId":"ses_2fb2c1de6ffeedW5XL7uipc3GN","title":"Explore msjx project structure (@explore subagent)","provider":"opencode","model":"mimo-v2-pro-free","requests":11,"totalTokens":623480,"inputTokens":93587,"outputTokens":7013,"reasoningTokens":228,"cacheRead":522880,"totalCost":0,"day":"2026-03-19"},{"sessionId":"ses_2fc67b251ffe2Zl5dbta1cgTbP","title":"New session - 2026-03-19T00:56:46.254Z","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":4,"totalTokens":85312,"inputTokens":84448,"outputTokens":864,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-19"},{"sessionId":"ses_2ff0a25e5ffeWq1ycNPcIguNps","title":"公示公告tab二层图标添加","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":17,"totalTokens":554630,"inputTokens":550785,"outputTokens":3845,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-18"},{"sessionId":"ses_2ff21fe04ffeOlzdTufMwT9bLZ","title":"修复msjx index页面blue-header半圆弧下边缘","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":17,"totalTokens":491813,"inputTokens":488363,"outputTokens":3450,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-18"},{"sessionId":"ses_2ff408510ffemmRmsW3JeerQMg","title":"my-record.vue tab栏选中图标切换","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":10,"totalTokens":256117,"inputTokens":253854,"outputTokens":2263,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-18"},{"sessionId":"ses_2ff752bbeffe7U0L5jFyT5V3C0","title":"修改index.vue使用selfcheckpopup组件","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":28,"totalTokens":1510332,"inputTokens":1491688,"outputTokens":18644,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-18"},{"sessionId":"ses_3003b360affeLszi4MXPiGkr1j","title":"detail.vue页面修改：底部padding和设立依据","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":6,"totalTokens":140580,"inputTokens":139431,"outputTokens":1149,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-18"},{"sessionId":"ses_3197a4c9cffebCdsIQgYtPooyo","title":"修复detail页面确认办理弹窗渐变背景样式","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":4,"totalTokens":87251,"inputTokens":85338,"outputTokens":1913,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-13"},{"sessionId":"ses_323f1007cffeKC1lSoZwAAWm1k","title":"补全policy-benefit需求确认单前端内容","provider":"modelscope","model":"ZhipuAI/GLM-5","requests":24,"totalTokens":1487130,"inputTokens":1476734,"outputTokens":10396,"reasoningTokens":0,"cacheRead":0,"totalCost":0,"day":"2026-03-11"},{"sessionId":"ses_35dc78626ffeA8cFJ0arTPbdK4","title":"微信小程序功能扩充建议","provider":"huoshan_fangzhou","model":"kimi-k2.5","requests":5,"totalTokens":75204,"inputTokens":74112,"outputTokens":1092,"reasoningTokens":360,"cacheRead":0,"totalCost":0,"day":"2026-02-28"},{"sessionId":"ses_362ce4a21ffeaOqmJK3VD2s3ci","title":"Project codebase optimization opportunities review","provider":"huoshan_fangzhou","model":"kimi-k2.5","requests":18,"totalTokens":666533,"inputTokens":624300,"outputTokens":42233,"reasoningTokens":38260,"cacheRead":0,"totalCost":0,"day":"2026-02-28"},{"sessionId":"ses_3618ac43dffeSiwe7A7cotOdAz","title":"Light chat: Do you have superpowers?","provider":"huoshan_fangzhou","model":"kimi-k2.5","requests":1,"totalTokens":13501,"inputTokens":13225,"outputTokens":276,"reasoningTokens":168,"cacheRead":0,"totalCost":0,"day":"2026-02-27"},{"sessionId":"ses_3618ce68affeeXgXW0cHPPuCGB","title":"Greeting in Chinese conversation","provider":"huoshan_fangzhou","model":"kimi-k2.5","requests":5,"totalTokens":63997,"inputTokens":62968,"outputTokens":1029,"reasoningTokens":825,"cacheRead":0,"totalCost":0,"day":"2026-02-27"},{"sessionId":"ses_362ce4a21ffeaOqmJK3VD2s3ci","title":"Project codebase optimization opportunities review","provider":"opencode","model":"minimax-m2.5-free","requests":7,"totalTokens":173166,"inputTokens":14132,"outputTokens":1847,"reasoningTokens":0,"cacheRead":127688,"totalCost":0,"day":"2026-02-27"}],"perfLogs":[],"perfSummary":[{"model":"deepseek-v4-flash-free","providerID":"opencode","requestCount":669,"totalInput":1457766,"totalOutput":199117,"totalCacheRead":57555072,"totalCacheWrite":200000,"totalCost":0,"avgTTFT":320,"maxTTFT":1200,"minTTFT":80,"avgTPS":52.3,"maxTPS":89.1,"minTPS":12.4,"avgLatency":4800,"maxLatency":15000,"minLatency":800},{"model":"mimo-v2-pro-free","providerID":"opencode","requestCount":523,"totalInput":1943645,"totalOutput":185873,"totalCacheRead":46011776,"totalCacheWrite":150000,"totalCost":0,"avgTTFT":450,"maxTTFT":1800,"minTTFT":120,"avgTPS":38.7,"maxTPS":72.3,"minTPS":8.9,"avgLatency":6200,"maxLatency":22000,"minLatency":1200},{"model":"deepseek-v4-pro","providerID":"deepseek","requestCount":107,"totalInput":489109,"totalOutput":110795,"totalCacheRead":6756992,"totalCacheWrite":80000,"totalCost":2.355,"avgTTFT":820,"maxTTFT":2500,"minTTFT":200,"avgTPS":28.5,"maxTPS":55,"minTPS":5.2,"avgLatency":8900,"maxLatency":30000,"minLatency":1500},{"model":"z-ai/glm-5.1","providerID":"nvidia","requestCount":129,"totalInput":6030236,"totalOutput":21621,"totalCacheRead":0,"totalCacheWrite":0,"totalCost":0,"avgTTFT":1200,"maxTTFT":3500,"minTTFT":400,"avgTPS":15.2,"maxTPS":30.1,"minTPS":3.5,"avgLatency":3500,"maxLatency":8000,"minLatency":1000}],"meta":{"generatedAt":"2026-05-22 14:00:00","dateRange":{"start":"2026-02-27","end":"2026-05-18"}}}</script>
+
+<script>
+var fmt = function(v) {
+  if (v == null) return '—';
+  if (v >= 1000000000) return (v/1000000000).toFixed(1)+'B';
+  if (v >= 1000000) return (v/1000000).toFixed(1)+'M';
+  if (v >= 1000) return (v/1000).toFixed(1)+'K';
+  return String(v);
+};
+
+window.switchTab = function(name) {
+  document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelector('[data-tab="' + name + '"]').classList.add('active');
+  setTimeout(function() {
+    if (name === 'daily' && window.dailyChart) window.dailyChart.resize();
+    if (name === 'heatmap' && window.heatmapChart) window.heatmapChart.resize();
+  }, 50);
+};
+
+var modelNames = ["deepseek-v4-flash-free","mimo-v2-pro-free","deepseek-v4-pro","z-ai/glm-5.1","ZhipuAI/GLM-5","qwen3.6-plus-free","deepseek-ai/DeepSeek-V4-Pro","kimi-k2.5","z-ai/glm5","deepseek-ai/deepseek-v4-pro","minimax-m2.5-free","minimaxai/minimax-m2.7"];
+var modelInput = [1457766,1943645,489109,6030236,4805631,228,2081862,774605,503260,332838,14132,28620];
+var modelOutput = [199117,185873,110795,21621,45224,17990,13491,44630,2698,2932,1847,139];
+var modelCache = [57555072,46011776,6756992,0,0,2285203,0,0,0,0,127688,0];
+var modelTps = [52.3,38.7,28.5,15.2,null,null,null,null,null,null,null,null];
+var currentStackMode = 'absolute';
+
+function initModelChart() {
+  var el = document.getElementById('model-chart');
+  if (!el) return;
+  var chart = echarts.init(el);
+  window.modelChart = chart;
+  renderModelChart(chart);
+  return chart;
+}
+
+function renderModelChart(chart) {
+  var isPercent = currentStackMode === 'percent';
+  var totals = modelInput.map(function(v, i) { return v + modelOutput[i] + modelCache[i]; });
+  var option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: function(params) {
+        var html = '<b>' + params[0].axisValue + '</b><br/>';
+        var total = 0;
+        params.forEach(function(p) {
+          if (p.seriesName !== 'TPS') {
+            html += p.marker + ' ' + p.seriesName + ': ' + fmt(p.value) + '<br/>';
+            total += p.value;
+          }
+        });
+        html += 'Total: ' + fmt(total) + '<br/>';
+        var tpsParam = params.find(function(p) { return p.seriesName === 'TPS'; });
+        if (tpsParam && tpsParam.value != null) {
+          html += tpsParam.marker + ' TPS: ' + tpsParam.value.toFixed(1) + '<br/>';
+        }
+        return html;
+      }
+    },
+    legend: {
+      data: ['Input', 'Output', 'Cache', 'TPS'],
+      textStyle: { color: '#B0B0C0' },
+      top: 5
+    },
+    grid: { left: 60, right: 60, bottom: 30, top: 50 },
+    xAxis: {
+      type: 'category',
+      data: modelNames,
+      axisLabel: { color: '#B0B0C0', rotate: 30, interval: 0, fontSize: 11 },
+      axisLine: { lineStyle: { color: '#2A2A35' } }
+    },
+    yAxis: [
+      {
+        type: isPercent ? 'value' : 'value',
+        name: isPercent ? 'Percentage' : 'Tokens',
+        max: isPercent ? 100 : null,
+        nameTextStyle: { color: '#B0B0C0' },
+        axisLabel: {
+          color: '#B0B0C0',
+          formatter: isPercent ? function(v) { return v + '%'; } : fmt
+        },
+        splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
+      },
+      {
+        type: 'value',
+        name: 'TPS',
+        nameTextStyle: { color: '#FFB800' },
+        axisLabel: { color: '#FFB800', formatter: function(v) { return v.toFixed(1); } },
+        splitLine: { show: false }
+      }
+    ],
+    series: [
+      {
+        name: 'Input',
+        type: 'bar',
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelInput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelInput,
+        itemStyle: { color: '#00D1FF' },
+        barMaxWidth: 40,
+        label: {
+          show: isPercent,
+          position: 'inside',
+          formatter: function(p) { return p.value.toFixed(1) + '%'; },
+          color: '#fff', fontSize: 10
+        }
+      },
+      {
+        name: 'Output',
+        type: 'bar',
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelOutput.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelOutput,
+        itemStyle: { color: '#B545FF' },
+        barMaxWidth: 40,
+        label: {
+          show: isPercent,
+          position: 'inside',
+          formatter: function(p) { return p.value.toFixed(1) + '%'; },
+          color: '#fff', fontSize: 10
+        }
+      },
+      {
+        name: 'Cache',
+        type: 'bar',
+        stack: isPercent ? 'percent' : 'tokens',
+        data: isPercent ? modelCache.map(function(v, i) { return totals[i] > 0 ? v / totals[i] * 100 : 0; }) : modelCache,
+        itemStyle: { color: '#00F593' },
+        barMaxWidth: 40,
+        label: {
+          show: true,
+          position: 'inside',
+          formatter: function(p) {
+            if (p.value === 0) return '';
+            var total = modelInput[p.dataIndex] + modelOutput[p.dataIndex] + modelCache[p.dataIndex];
+            return total > 0 ? (modelCache[p.dataIndex] / (modelInput[p.dataIndex] + modelCache[p.dataIndex]) * 100).toFixed(1) + '%' : '';
+          },
+          color: '#0C0C0E', fontSize: 10, fontWeight: 'bold'
+        }
+      },
+      {
+        name: 'TPS',
+        type: 'line',
+        yAxisIndex: 1,
+        data: modelTps,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { color: '#FFB800', width: 2 },
+        itemStyle: { color: '#FFB800' },
+        label: {
+          show: true,
+          position: 'top',
+          formatter: function(p) { return p.value != null ? p.value.toFixed(1) : ''; },
+          color: '#FFB800', fontSize: 10
+        }
+      }
+    ]
+  };
+  chart.setOption(option);
+  chart.resize();
+}
+
+window.setStackMode = function(mode) {
+  currentStackMode = mode;
+  document.querySelectorAll('.toggle-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelector('[data-mode="' + mode + '"]').classList.add('active');
+  if (window.modelChart) renderModelChart(window.modelChart);
+};
+
+var scatterData = [{"name":"deepseek-v4-flash-free","provider":"opencode","tps":52.3,"value":[320,0,669]},{"name":"mimo-v2-pro-free","provider":"opencode","tps":38.7,"value":[450,0,523]},{"name":"deepseek-v4-pro","provider":"deepseek","tps":28.5,"value":[820,0.003925628100496079,107]},{"name":"z-ai/glm-5.1","provider":"nvidia","tps":15.2,"value":[1200,0,129]}];
+var providerColors = {"opencode":"#00F593","deepseek":"#00D1FF","nvidia":"#B545FF","modelscope":"#FFB800"};
+
+function initScatterChart() {
+  var el = document.getElementById('scatter-chart');
+  if (!el) return;
+  var chart = echarts.init(el);
+  window.scatterChart = chart;
+  var option = {
+    tooltip: {
+      formatter: function(params) {
+        var d = params.data;
+        return '<b>' + params.name + '</b><br/>' +
+          'Provider: ' + (d.provider || '—') + '<br/>' +
+          'TTFT: ' + (d.value[0] != null ? d.value[0].toFixed(1) + 'ms' : '—') + '<br/>' +
+          'TPS: ' + (d.tps != null ? d.tps.toFixed(1) : '—') + '<br/>' +
+          'Cost/1K: $' + d.value[1].toFixed(4) + '<br/>' +
+          'Requests: ' + d.value[2];
+      }
+    },
+    grid: { left: 70, right: 30, bottom: 40, top: 20 },
+    xAxis: {
+      type: 'log',
+      name: 'TTFT (ms)',
+      nameTextStyle: { color: '#B0B0C0' },
+      axisLabel: { color: '#B0B0C0' },
+      splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Cost per 1K tokens',
+      nameTextStyle: { color: '#B0B0C0' },
+      axisLabel: { color: '#B0B0C0', formatter: function(v) { return '$' + v.toFixed(4); } },
+      splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
+    },
+    series: [{
+      type: 'scatter',
+      data: scatterData.map(function(d) {
+        return {
+          value: d.value,
+          name: d.name,
+          provider: d.provider,
+          tps: d.tps,
+          itemStyle: { color: providerColors[d.provider] || '#B545FF' }
+        };
+      }),
+      symbolSize: function(val) {
+        return Math.max(8, Math.min(40, Math.sqrt(val[2]) * 3));
+      },
+      itemStyle: { opacity: 0.8 },
+      label: {
+        show: true,
+        formatter: function(p) { return p.name; },
+        position: 'right',
+        color: '#B0B0C0',
+        fontSize: 10
+      }
+    }]
+  };
+  chart.setOption(option);
+  chart.resize();
+}
+
+var dailyDays = ["2026-02-27","2026-02-28","2026-03-11","2026-03-13","2026-03-18","2026-03-19","2026-03-20","2026-03-27","2026-03-31","2026-04-02","2026-04-10","2026-04-17","2026-04-20","2026-04-22","2026-04-24","2026-04-28","2026-05-06","2026-05-13","2026-05-14","2026-05-15","2026-05-18"];
+var dailyTokens = [336347,656054,1487130,87251,2953472,1304499,37297249,7651671,1973187,237690,147697,271374,244998,303777,380380,4737862,5628262,26638026,20005809,17482376,2676845];
+var dailyCosts = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1.44195366,0.58934148,0,0,0.91305572,0];
+
+function initDailyChart() {
+  var el = document.getElementById('daily-chart');
+  if (!el) return;
+  var chart = echarts.init(el);
+  window.dailyChart = chart;
+  var option = {
+    tooltip: {
+      trigger: 'axis',
+      formatter: function(params) {
+        var html = '<b>' + params[0].axisValue + '</b><br/>';
+        params.forEach(function(p) {
+          html += p.marker + ' ' + p.seriesName + ': ' + (p.seriesName === 'Cost' ? '$' + p.value.toFixed(4) : fmt(p.value)) + '<br/>';
+        });
+        return html;
+      }
+    },
+    legend: {
+      data: ['Tokens', 'Cost'],
+      textStyle: { color: '#B0B0C0' },
+      top: 5
+    },
+    grid: { left: 60, right: 60, bottom: 60, top: 40 },
+    xAxis: {
+      type: 'category',
+      data: dailyDays,
+      axisLabel: { color: '#B0B0C0', rotate: 45, interval: 0, fontSize: 10 },
+      axisLine: { lineStyle: { color: '#2A2A35' } }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: 'Tokens',
+        nameTextStyle: { color: '#B0B0C0' },
+        axisLabel: { color: '#B0B0C0', formatter: fmt },
+        splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
+      },
+      {
+        type: 'value',
+        name: 'Cost',
+        nameTextStyle: { color: '#FFB800' },
+        axisLabel: { color: '#FFB800', formatter: function(v) { return '$' + v.toFixed(4); } },
+        splitLine: { show: false }
+      }
+    ],
+    dataZoom: [{
+      type: 'slider',
+      bottom: 10,
+      height: 20,
+      borderColor: '#2A2A35',
+      fillerColor: 'rgba(0,213,255,0.1)',
+      handleStyle: { color: '#00D1FF' },
+      textStyle: { color: '#B0B0C0' }
+    }],
+    series: [
+      {
+        name: 'Tokens',
+        type: 'line',
+        data: dailyTokens,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#00D1FF', width: 2 },
+        areaStyle: { color: 'rgba(0,209,255,0.15)' }
+      },
+      {
+        name: 'Cost',
+        type: 'line',
+        yAxisIndex: 1,
+        data: dailyCosts,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#FFB800', width: 2 },
+        areaStyle: { color: 'rgba(255,184,0,0.1)' }
+      }
+    ]
+  };
+  chart.setOption(option);
+  chart.resize();
+}
+
+var heatData = [["2026-02-27",5.526788849614937],["2026-02-28",5.816940249734248],["2026-03-11",6.172349226807931],["2026-03-13",4.94077539069149],["2026-03-18",6.470333004987397],["2026-03-19",6.115444083436239],["2026-03-20",7.571676811598136],["2026-03-27",6.883756345092431],["2026-03-31",6.295168465623658],["2026-04-02",5.376012737789033],["2026-04-10",5.169374614507314],["2026-04-17",5.4335698364624765],["2026-04-20",5.389164311730377],["2026-04-22",5.482556318491325],["2026-04-24",5.580218815833105],["2026-04-28",6.675582498513331],["2026-05-06",6.75037438314438],["2026-05-13",7.42550205477962],["2026-05-14",7.301156139889413],["2026-05-15",7.242600481376216],["2026-05-18",6.427623386773772]];
+
+function initHeatmapChart() {
+  var el = document.getElementById('heatmap-chart');
+  if (!el) return;
+  var chart = echarts.init(el);
+  window.heatmapChart = chart;
+  var option = {
+    tooltip: {
+      formatter: function(params) {
+        var val = params.value;
+        var rawTokens = Math.pow(10, val[1]) - 1;
+        return '<b>' + val[0] + '</b><br/>Tokens: ' + fmt(Math.round(rawTokens));
+      }
+    },
+    visualMap: {
+      min: 0,
+      max: Math.max.apply(null, heatData.map(function(d) { return d[1]; })) || 5,
+      calculable: true,
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 10,
+      textStyle: { color: '#B0B0C0' },
+      inRange: {
+        color: ['#0C0C0E', '#1a3a2a', '#00F593', '#00D1FF', '#B545FF']
+      }
+    },
+    calendar: {
+      left: 30,
+      right: 30,
+      top: 20,
+      bottom: 60,
+      range: ['2026-02-27', '2026-05-18'],
+      splitLine: { lineStyle: { color: '#2A2A35' } },
+      dayLabel: { color: '#B0B0C0' },
+      monthLabel: { color: '#B0B0C0' },
+      yearLabel: { color: '#B0B0C0' },
+      itemStyle: { color: '#16161A', borderColor: '#0C0C0E', borderWidth: 2 }
+    },
+    series: [{
+      type: 'heatmap',
+      coordinateSystem: 'calendar',
+      data: heatData
+    }]
+  };
+  chart.setOption(option);
+  chart.resize();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initModelChart();
+  initScatterChart();
+  initDailyChart();
+  initHeatmapChart();
+});
+
+window.addEventListener('resize', function() {
+  if (window.modelChart) window.modelChart.resize();
+  if (window.scatterChart) window.scatterChart.resize();
+  if (window.dailyChart) window.dailyChart.resize();
+  if (window.heatmapChart) window.heatmapChart.resize();
+});
+</script>
+</body>
+</html>
