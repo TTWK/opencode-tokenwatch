@@ -99,6 +99,11 @@ function escapeSql(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+/** 校验日期格式必须为 YYYY-MM-DD，防止格式异常字符串进入 SQL */
+function isValidDate(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
 function messageWhere(filters: UsageFilters): string {
   const where = [
     "json_extract(m.data, '$.role') = 'assistant'",
@@ -108,11 +113,17 @@ function messageWhere(filters: UsageFilters): string {
   if (filters.sessionId) where.push(`m.session_id = '${escapeSql(filters.sessionId)}'`)
   if (filters.provider) where.push(`coalesce(json_extract(m.data, '$.providerID'), '') = '${escapeSql(filters.provider)}'`)
   if (filters.model) where.push(`coalesce(json_extract(m.data, '$.modelID'), '') = '${escapeSql(filters.model)}'`)
-  if (filters.startDate) where.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') >= '${escapeSql(filters.startDate)}'`)
-  if (filters.endDate) where.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') <= '${escapeSql(filters.endDate)}'`)
+  // Risk fix: 日期参数先验证格式（YYYY-MM-DD），格式不符则忽略该过滤条件
+  if (filters.startDate && isValidDate(filters.startDate)) {
+    where.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') >= '${filters.startDate}'`)
+  }
+  if (filters.endDate && isValidDate(filters.endDate)) {
+    where.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') <= '${filters.endDate}'`)
+  }
 
   return where.join(" AND ")
 }
+
 
 function parseList(value: string | null | undefined): string[] {
   if (!value) return []

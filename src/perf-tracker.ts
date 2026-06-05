@@ -1,10 +1,9 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { LogEntry, ModelPerfStats, SessionPerfStats } from "./formatter.js"
-import { appendFileSync } from "node:fs"
-import { readFileSync } from "node:fs"
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
 
@@ -118,6 +117,14 @@ class PerfTracker {
 
   private appendLog(entry: LogEntry): void {
     try {
+      // Risk fix: JSONL 日志轮转保护，防止长期使用后文件无限增长
+      // 超过 5MB 时截断，保留最新 2000 行
+      const MAX_SIZE = 5 * 1024 * 1024  // 5 MB
+      const KEEP_LINES = 2000
+      if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > MAX_SIZE) {
+        const lines = readFileSync(LOG_PATH, "utf-8").trim().split("\n")
+        writeFileSync(LOG_PATH, lines.slice(-KEEP_LINES).join("\n") + "\n")
+      }
       appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n")
     } catch {
       // Silently fail — logging is non-critical

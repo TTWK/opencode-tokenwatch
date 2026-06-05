@@ -44,8 +44,6 @@ const zh: Record<string, string> = {
 
   toolResult: "Tool结果",
   outputTokens: "输出",
-  settings: "Settings",
-  showCache: "显示缓存统计",
   showPerformance: "显示性能指标",
   showPricing: "显示模型定价",
   showTokenDistribution: "显示Token分布",
@@ -119,8 +117,6 @@ const en: Record<string, string> = {
   toolCall: "Tool Call",
   toolResult: "Tool Result",
   outputTokens: "Output",
-  settings: "Settings",
-  showCache: "Show Cache",
   showPerformance: "Show Performance",
   showPricing: "Show Pricing",
   showTokenDistribution: "Show Token Distribution",

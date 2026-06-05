@@ -279,9 +279,11 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   }
 
   onMount(() => {
+    // Risk fix: 移除 message.updated 的重复订阅。
+    // tui.tsx 已通过 setSidebarRevision() 驱动 sidebar 整体重渲，
+    // sidebar 内部只需订阅 part.updated 来触发 tokenDistribution 重算。
     const unsubPart = api.event?.on?.("message.part.updated", () => setPartVersion(v => v + 1))
-    const unsubMsg = api.event?.on?.("message.updated", () => setPartVersion(v => v + 1))
-    onCleanup(() => { try { unsubPart?.(); unsubMsg?.() } catch {} })
+    onCleanup(() => { try { unsubPart?.() } catch {} })
   })
 
   return (
