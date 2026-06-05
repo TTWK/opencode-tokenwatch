@@ -59,6 +59,9 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
         model: key,
         providerID: entry.providerID,
         requestCount: 0,
+        ttftCount: 0,    // Bug fix: 独立维护有效样本计数
+        tpsCount: 0,
+        latencyCount: 0,
         totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheWrite: 0, totalCost: 0,
         avgTTFT: null, maxTTFT: null, minTTFT: null,
         avgTPS: null, maxTPS: null, minTPS: null,
@@ -73,18 +76,25 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
     s.totalCacheWrite += entry.cacheWriteTokens
     s.totalCost += entry.cost
 
-    const c = s.requestCount
     if (entry.ttft_ms != null) {
+      // Bug fix: 分母使用 ttftCount（有效样本数），而非 requestCount（总请求数）
+      s.ttftCount++
+      const c = s.ttftCount
       s.avgTTFT = s.avgTTFT != null ? s.avgTTFT + (entry.ttft_ms - s.avgTTFT) / c : entry.ttft_ms
       s.maxTTFT = s.maxTTFT != null ? Math.max(s.maxTTFT, entry.ttft_ms) : entry.ttft_ms
       s.minTTFT = s.minTTFT != null ? Math.min(s.minTTFT, entry.ttft_ms) : entry.ttft_ms
     }
     if (entry.tps != null) {
+      // Bug fix: 分母使用 tpsCount（有效样本数）
+      s.tpsCount++
+      const c = s.tpsCount
       s.avgTPS = s.avgTPS != null ? s.avgTPS + (entry.tps - s.avgTPS) / c : entry.tps
       s.maxTPS = s.maxTPS != null ? Math.max(s.maxTPS, entry.tps) : entry.tps
       s.minTPS = s.minTPS != null ? Math.min(s.minTPS, entry.tps) : entry.tps
     }
     if (entry.latency_ms != null) {
+      s.latencyCount++
+      const c = s.latencyCount
       s.avgLatency = s.avgLatency != null ? s.avgLatency + (entry.latency_ms - s.avgLatency) / c : entry.latency_ms
       s.maxLatency = s.maxLatency != null ? Math.max(s.maxLatency, entry.latency_ms) : entry.latency_ms
       s.minLatency = s.minLatency != null ? Math.min(s.minLatency, entry.latency_ms) : entry.latency_ms
@@ -92,6 +102,7 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
   }
   return Array.from(map.values())
 }
+
 
 async function buildCombinedData(api: TuiPluginApi, filters: UsageFilters = {}): Promise<CombinedReportData> {
   const report = await getUsageReport(filters)

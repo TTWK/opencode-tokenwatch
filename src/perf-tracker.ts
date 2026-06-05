@@ -48,7 +48,11 @@ class PerfTracker {
 
   handlePartUpdated(event: PartEvent): void {
     if (!event.time?.start || !event.message_id) return
-    this.firstPartTimes.set(event.message_id, event.time.start)
+    // Bug fix: 取最早 part 时间而非最后一个，避免 TTFT 被高估
+    const cur = this.firstPartTimes.get(event.message_id) ?? Number.POSITIVE_INFINITY
+    if (event.time.start < cur) {
+      this.firstPartTimes.set(event.message_id, event.time.start)
+    }
   }
 
   handleMessageUpdated(event: MessageUpdateEvent): void {
@@ -134,6 +138,9 @@ class PerfTracker {
         model,
         providerID: entry.providerID,
         requestCount: 0,
+        ttftCount: 0,    // Bug fix: 独立维护有效样本计数
+        tpsCount: 0,
+        latencyCount: 0,
         totalInput: 0,
         totalOutput: 0,
         totalCacheRead: 0,
@@ -160,7 +167,9 @@ class PerfTracker {
     stats.totalCost += entry.cost
 
     if (entry.ttft_ms !== null) {
-      const c = stats.requestCount
+      // Bug fix: 分母使用 ttftCount（有效样本数），而非 requestCount（总请求数）
+      stats.ttftCount++
+      const c = stats.ttftCount
       const prev = stats.avgTTFT
       stats.avgTTFT = prev !== null ? prev + (entry.ttft_ms - prev) / c : entry.ttft_ms
       stats.maxTTFT = stats.maxTTFT !== null ? Math.max(stats.maxTTFT, entry.ttft_ms) : entry.ttft_ms
@@ -168,7 +177,9 @@ class PerfTracker {
     }
 
     if (entry.tps !== null) {
-      const c = stats.requestCount
+      // Bug fix: 分母使用 tpsCount（有效样本数）
+      stats.tpsCount++
+      const c = stats.tpsCount
       const prev = stats.avgTPS
       stats.avgTPS = prev !== null ? prev + (entry.tps - prev) / c : entry.tps
       stats.maxTPS = stats.maxTPS !== null ? Math.max(stats.maxTPS, entry.tps) : entry.tps
@@ -176,7 +187,9 @@ class PerfTracker {
     }
 
     if (entry.latency_ms !== null) {
-      const c = stats.requestCount
+      // latency 每条消息都有，但保持一致使用专用计数
+      stats.latencyCount++
+      const c = stats.latencyCount
       const prev = stats.avgLatency
       stats.avgLatency = prev !== null ? prev + (entry.latency_ms - prev) / c : entry.latency_ms
       stats.maxLatency = stats.maxLatency !== null ? Math.max(stats.maxLatency, entry.latency_ms) : entry.latency_ms

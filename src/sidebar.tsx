@@ -83,6 +83,7 @@ interface ModelAgg {
   modelID: string
   totalInput: number
   totalOutput: number
+  totalReasoning: number   // Bug fix: 补全 reasoning 分量
   cacheRead: number
   cacheWrite: number
   totalCost: number
@@ -128,11 +129,13 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
       const key = `${msg.providerID}/${msg.modelID}`
       let e = map.get(key)
       if (!e) {
-        e = { providerID: msg.providerID, modelID: msg.modelID, totalInput: 0, totalOutput: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0 }
+        // Bug fix: 初始化时加入 totalReasoning 字段
+        e = { providerID: msg.providerID, modelID: msg.modelID, totalInput: 0, totalOutput: 0, totalReasoning: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0 }
         map.set(key, e)
       }
       e.totalInput += msg.inputTokens
       e.totalOutput += msg.outputTokens
+      e.totalReasoning += msg.reasoningTokens   // Bug fix: 聚合 reasoning
       e.cacheRead += msg.cacheRead
       e.cacheWrite += msg.cacheWrite
       e.totalCost += msg.cost
@@ -142,9 +145,13 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   })
 
   const sessionTotals = createMemo(() => {
-    let i = 0, o = 0, cr = 0, cw = 0, r = 0, c = 0
-    for (const [, s] of modelStats()) { i += s.totalInput; o += s.totalOutput; cr += s.cacheRead; cw += s.cacheWrite; r += s.requestCount; c += s.totalCost }
-    return { totalInput: i, totalOutput: o, totalCacheRead: cr, totalCacheWrite: cw, totalRequests: r, totalCost: c, totalTokens: i + o + cr + cw }
+    let i = 0, o = 0, ir = 0, cr = 0, cw = 0, r = 0, c = 0
+    for (const [, s] of modelStats()) {
+      i += s.totalInput; o += s.totalOutput; ir += s.totalReasoning
+      cr += s.cacheRead; cw += s.cacheWrite; r += s.requestCount; c += s.totalCost
+    }
+    // Bug fix: totalTokens 改为 5 分量（含 reasoning），与官方一致
+    return { totalInput: i, totalOutput: o, totalReasoning: ir, totalCacheRead: cr, totalCacheWrite: cw, totalRequests: r, totalCost: c, totalTokens: i + o + ir + cr + cw }
   })
 
   const modelHitRate = createMemo(() => {
@@ -301,7 +308,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                   <text fg={primaryColor()}>{modelCollapsed() ? "▼" : "▶"} {shortTitle}</text>
                 </box>
                 <text fg={mutedColor()}>
-                  {t("total")}:{formatTokens(stat.totalInput + stat.totalOutput + stat.cacheRead + stat.cacheWrite)}  {t("requests")}:{stat.requestCount}
+                  {/* Bug fix: total 改为 5 分量（含 reasoning） */}
+                  {t("total")}:{formatTokens(stat.totalInput + stat.totalOutput + stat.totalReasoning + stat.cacheRead + stat.cacheWrite)}  {t("requests")}:{stat.requestCount}
                 </text>
                 <text fg={mutedColor()}>
                   {t("input")}:{formatTokens(stat.totalInput)}  {t("output")}:{formatTokens(stat.totalOutput)}

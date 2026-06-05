@@ -411,6 +411,9 @@ export interface ModelPerfStats {
   model: string
   providerID: string
   requestCount: number
+  ttftCount: number    // 有效 TTFT 样本数（非 null）
+  tpsCount: number     // 有效 TPS 样本数（非 null）
+  latencyCount: number // 有效 latency 样本数
   totalInput: number
   totalOutput: number
   totalCacheRead: number

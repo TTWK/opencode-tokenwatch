@@ -63,10 +63,14 @@ const tui: TuiPluginModule["tui"] = async (api) => {
         } else {
           next = [...prev, msg]
         }
-        persistToKv(currentSlotSessionID, next)
+        // Bug fix: 优先使用事件自带的 sessionID，而非 currentSlotSessionID
+        // currentSlotSessionID 在 slot 首次渲染时才更新，session 切换瞬间可能落后
+        const targetSessionID = info.sessionID ?? currentSlotSessionID
+        persistToKv(targetSessionID, next)
         return next
       })
     }
+
 
     setSidebarRevision((v) => v + 1)
   })
