@@ -1,6 +1,7 @@
 import { exec } from "node:child_process"
 import type {
   DailyBreakdownItem,
+  ErrorStats,
   ModelBreakdownItem,
   ProviderBreakdownItem,
   SessionBreakdownItem,
@@ -360,16 +361,74 @@ ORDER BY value ASC
   return rows.map((row) => row.value ?? "unknown")
 }
 
+/** 失败请求计数 SQL。1次运行获取成功数＋失败数＋按模型细分 */
+export async function getErrorStats(filters: UsageFilters = {}): Promise<ErrorStats> {
+  // 构建日期／Session/Provider/Model 过滤条件（不包含 tokens.total > 0 过滤）
+  const baseConds: string[] = [
+    "json_extract(m.data, '$.role') = 'assistant'",
+  ]
+  if (filters.sessionId) baseConds.push(`m.session_id = '${escapeSql(filters.sessionId)}'`)
+  if (filters.provider) baseConds.push(`coalesce(json_extract(m.data, '$.providerID'), '') = '${escapeSql(filters.provider)}'`)
+  if (filters.model) baseConds.push(`coalesce(json_extract(m.data, '$.modelID'), '') = '${escapeSql(filters.model)}'`)
+  if (filters.startDate && isValidDate(filters.startDate)) {
+    baseConds.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') >= '${filters.startDate}'`)
+  }
+  if (filters.endDate && isValidDate(filters.endDate)) {
+    baseConds.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') <= '${filters.endDate}'`)
+  }
+  const baseWhere = baseConds.join(" AND ")
+
+  // 按模型细化：同时统计成功和失败请求
+  const sql = `
+SELECT
+  coalesce(json_extract(m.data, '$.providerID'), 'unknown') as provider,
+  coalesce(json_extract(m.data, '$.modelID'), 'unknown') as model,
+  count(*) as total,
+  sum(CASE WHEN coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0 THEN 1 ELSE 0 END) as failed
+FROM message m
+WHERE ${baseWhere}
+GROUP BY provider, model
+ORDER BY failed DESC
+  `.trim()
+
+  interface ErrorRow {
+    provider: string | null
+    model: string | null
+    total: number | null
+    failed: number | null
+  }
+
+  try {
+    const rows = await queryDb<ErrorRow>(sql)
+    let successCount = 0, failedCount = 0
+    const byModel = rows.map(r => {
+      const total = r.total ?? 0
+      const failed = r.failed ?? 0
+      const success = total - failed
+      successCount += success
+      failedCount += failed
+      return { provider: r.provider ?? 'unknown', model: r.model ?? 'unknown', failed, total }
+    })
+    const errorRate = (successCount + failedCount) > 0
+      ? failedCount / (successCount + failedCount)
+      : 0
+    return { successCount, failedCount, errorRate, byModel }
+  } catch {
+    return { successCount: 0, failedCount: 0, errorRate: 0, byModel: [] }
+  }
+}
+
 export async function getUsageReport(filters: UsageFilters = {}): Promise<UsageReport> {
-  const [summary, models, providers, daily, sessions] = await Promise.all([
+  const [summary, models, providers, daily, sessions, errors] = await Promise.all([
     getSummary(filters),
     getModelBreakdown(filters),
     getProviderBreakdown(filters),
     getDailyBreakdown(filters),
     getSessionBreakdown(filters),
+    getErrorStats(filters),
   ])
 
-  return { filters, summary, models, providers, daily, sessions }
+  return { filters, summary, models, providers, daily, sessions, errors }
 }
 
 function csvEscape(value: string | number): string {
