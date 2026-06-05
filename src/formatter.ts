@@ -73,6 +73,18 @@ export interface SessionBreakdownItem {
   day: string
 }
 
+/** 失败请求统计 */
+export interface ErrorStats {
+  /** 过滤内总请求数（tokens.total > 0 的 assistant） */
+  successCount: number
+  /** 失败请求数（tokens.total == 0 的 assistant） */
+  failedCount: number
+  /** 失败率：failedCount / (successCount + failedCount) */
+  errorRate: number
+  /** 按模型细化的失败数 */
+  byModel: Array<{ provider: string; model: string; failed: number; total: number }>
+}
+
 export interface UsageReport {
   filters: UsageFilters
   summary: SessionTokenData
@@ -80,6 +92,7 @@ export interface UsageReport {
   providers: ProviderBreakdownItem[]
   daily: DailyBreakdownItem[]
   sessions: SessionBreakdownItem[]
+  errors?: ErrorStats
 }
 
 interface Column {
@@ -404,6 +417,8 @@ export interface SessionPerfStats {
     totalCacheWrite: number
     totalRequests: number
     totalCost: number
+    /** 全局加权缓存命中率（按请求数加权平均） */
+    weightedCacheHitRate: number | null
   }
 }
 
@@ -422,12 +437,20 @@ export interface ModelPerfStats {
   avgTTFT: number | null
   maxTTFT: number | null
   minTTFT: number | null
+  p50TTFT: number | null   // TTFT 中位数
+  p95TTFT: number | null   // TTFT P95
+  p99TTFT: number | null   // TTFT P99
   avgTPS: number | null
   maxTPS: number | null
   minTPS: number | null
   avgLatency: number | null
   maxLatency: number | null
   minLatency: number | null
+  p50Latency: number | null  // 端到端延迟 P50
+  p95Latency: number | null  // 端到端延迟 P95
+  p99Latency: number | null  // 端到端延迟 P99
+  /** 该模型加权缓存命中率：cacheRead / (cacheRead + input) */
+  cacheHitRate: number | null
 }
 
 export interface TokenDistribution {

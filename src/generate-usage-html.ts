@@ -39,8 +39,13 @@ function renderKpiCards(data: CombinedReportData): string {
     ? data.perfSummary.reduce((sum, p) => sum + (p.avgTPS ?? 0) * p.requestCount, 0) /
       data.perfSummary.reduce((sum, p) => sum + p.requestCount, 0)
     : 0
-  const avgTps = avgTpsRaw ? avgTpsRaw.toFixed(1) : "—"
+  const avgTps = avgTpsRaw ? avgTpsRaw.toFixed(1) : '—'
   const isHighCache = hitRate >= 0.5
+
+  const errors = (data as any).errors as { errorRate: number; failedCount: number } | undefined
+  const errorRatePct = errors ? (errors.errorRate * 100).toFixed(1) + '%' : '—'
+  const errorColor = errors && errors.errorRate >= 0.05 ? 'var(--output)'
+    : errors && errors.errorRate > 0 ? 'var(--tps)' : 'var(--cache)'
 
   return `
     <div class="kpi-row">
@@ -63,6 +68,10 @@ function renderKpiCards(data: CombinedReportData): string {
       <div class="kpi-card">
         <div class="kpi-label">Total Cost</div>
         <div class="kpi-value" style="color:var(--tps)">${fmtCost(s.totalCost)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Error Rate</div>
+        <div class="kpi-value" style="color:${errorColor}">${errorRatePct}</div>
       </div>
     </div>`
 }
@@ -339,6 +348,7 @@ function renderDataTable(data: CombinedReportData): string {
     const hitColor = hitRate >= 0.85 ? 'var(--cache)' : hitRate >= 0.70 ? 'var(--tps)' : 'var(--output)'
     const perf = data.perfSummary.find(p => p.model === `${m.provider}/${m.model}`)
     const ttft = perf?.avgTTFT != null ? perf.avgTTFT.toFixed(0) + 'ms' : '—'
+    const p95ttft = perf?.p95TTFT != null ? perf.p95TTFT.toFixed(0) + 'ms' : '—'
     const tps = perf?.avgTPS != null ? perf.avgTPS.toFixed(1) : '—'
 
     return `<tr>
@@ -351,6 +361,7 @@ function renderDataTable(data: CombinedReportData): string {
       <td>${fmtTokens(m.cacheRead)}</td>
       <td style="color:${hitColor};font-weight:600">${hitRatePct}</td>
       <td>${ttft}</td>
+      <td style="color:var(--tps);font-size:0.85em">${p95ttft}</td>
       <td>${tps}</td>
       <td>${fmtCost(m.totalCost)}</td>
     </tr>`
@@ -367,13 +378,109 @@ function renderDataTable(data: CombinedReportData): string {
         <th>Output</th>
         <th>Cache</th>
         <th>Hit Rate</th>
-        <th>TTFT</th>
+        <th>Avg TTFT</th>
+        <th>P95 TTFT</th>
         <th>TPS</th>
         <th>Cost</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
   </table>`
+}
+
+/** 渲染 P50/P95/P99 延迟分位数表格 */
+function renderPerfPercentileTable(data: CombinedReportData): string {
+  if (data.perfSummary.length === 0) return ''
+
+  const fmtMs = (v: number | null | undefined) =>
+    v != null ? v.toFixed(0) + 'ms' : '—'
+
+  const rows = data.perfSummary.map(p => {
+    const hitColor = p.cacheHitRate != null && p.cacheHitRate >= 85 ? 'var(--cache)'
+      : p.cacheHitRate != null && p.cacheHitRate >= 70 ? 'var(--tps)' : 'var(--output)'
+    return `<tr>
+      <td>${p.model}</td>
+      <td>${p.requestCount}</td>
+      <td>${fmtMs(p.avgTTFT)}</td>
+      <td>${fmtMs(p.p50TTFT)}</td>
+      <td>${fmtMs(p.p95TTFT)}</td>
+      <td>${fmtMs(p.p99TTFT)}</td>
+      <td>${fmtMs(p.avgLatency)}</td>
+      <td>${fmtMs(p.p50Latency)}</td>
+      <td>${fmtMs(p.p95Latency)}</td>
+      <td>${fmtMs(p.p99Latency)}</td>
+      <td style="color:${hitColor};font-weight:600">${p.cacheHitRate != null ? p.cacheHitRate.toFixed(1) + '%' : '—'}</td>
+    </tr>`
+  }).join("\n")
+
+  return `
+  <section class="section">
+    <h2 class="section-title">Performance Latency Percentiles</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Req</th>
+          <th>Avg TTFT</th>
+          <th>P50 TTFT</th>
+          <th>P95 TTFT</th>
+          <th>P99 TTFT</th>
+          <th>Avg E2E</th>
+          <th>P50 E2E</th>
+          <th>P95 E2E</th>
+          <th>P99 E2E</th>
+          <th>Cache Hit</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </section>`
+}
+
+/** 渲染失败请求统计区域 */
+function renderErrorStatsSection(data: CombinedReportData): string {
+  const errors = (data as any).errors as {
+    successCount: number; failedCount: number; errorRate: number
+    byModel: Array<{ provider: string; model: string; failed: number; total: number }>
+  } | undefined
+
+  if (!errors || errors.failedCount === 0) return ''
+
+  const errorRatePct = (errors.errorRate * 100).toFixed(2) + '%'
+  const rateColor = errors.errorRate >= 0.05 ? 'var(--output)'
+    : errors.errorRate > 0 ? 'var(--tps)' : 'var(--cache)'
+
+  const rows = errors.byModel
+    .filter(m => m.failed > 0)
+    .map(m => {
+      const modelRate = m.total > 0 ? (m.failed / m.total * 100).toFixed(1) + '%' : '—'
+      return `<tr>
+        <td>${m.provider}</td>
+        <td>${m.model}</td>
+        <td>${m.total}</td>
+        <td style="color:var(--output)">${m.failed}</td>
+        <td style="color:var(--tps)">${m.total - m.failed}</td>
+        <td style="color:${errors.errorRate >= 0.05 ? 'var(--output)' : 'var(--tps)'}">${modelRate}</td>
+      </tr>`
+    }).join('\n')
+
+  return `
+  <section class="section">
+    <h2 class="section-title">Failed Requests
+      <span style="margin-left:12px;font-size:0.85em;color:${rateColor}">
+        overall error rate: ${errorRatePct} (${errors.failedCount} failed / ${errors.successCount + errors.failedCount} total)
+      </span>
+    </h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Provider</th><th>Model</th><th>Total</th>
+          <th>Failed</th><th>Success</th><th>Error Rate</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </section>`
 }
 
 function renderDailyTrendInit(data: CombinedReportData): string {
@@ -531,6 +638,8 @@ export function generateUsageHtml(data: CombinedReportData): string {
   const scatterChartJs = renderScatterChartInit(data)
   const providerStr = renderProviderCards(data)
   const tableStr = renderDataTable(data)
+  const perfPercentileStr = renderPerfPercentileTable(data)
+  const errorStatsStr = renderErrorStatsSection(data)
   const dailyChartJs = renderDailyTrendInit(data)
   const heatmapJs = renderHeatmapInit(data)
   const hasPerf = data.perfSummary.length > 0
@@ -576,7 +685,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   .header h1 span { color: var(--input); }
   .header .meta { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
 
-  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  .kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
   .kpi-card {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 16px; text-align: center;
@@ -676,6 +785,10 @@ export function generateUsageHtml(data: CombinedReportData): string {
     <div class="section-title">Detailed Data Grid</div>
     ${tableStr}
   </div>
+
+  ${perfPercentileStr}
+
+  ${errorStatsStr}
 
   <div class="section">
     <div class="section-title">Efficiency vs Cost</div>

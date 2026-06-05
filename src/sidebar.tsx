@@ -302,6 +302,16 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
         <text fg={mutedColor()}>
           {t("input")}:{formatTokens(sessionTotals().totalInput)}  {t("output")}:{formatTokens(sessionTotals().totalOutput)}  {t("cacheRead")}:{formatTokens(sessionTotals().totalCacheRead)}
         </text>
+        {/* 全局加权缓存命中率（按 token 加权：totalCacheRead / (totalCacheRead + totalInput)） */}
+        <Show when={(sessionTotals().totalInput + sessionTotals().totalCacheRead) > 0}>
+          <text fg={mutedColor()}>
+            {t("cache")}Hit:{(() => {
+              const denom = sessionTotals().totalInput + sessionTotals().totalCacheRead
+              const rate = denom > 0 ? (sessionTotals().totalCacheRead / denom) * 100 : 0
+              return rate.toFixed(1) + "%"
+            })()}(global)
+          </text>
+        </Show>
         <Show when={sessionTotals().totalCost > 0}>
           <text fg={mutedColor()}>
             {t("cost")}:{formatCost(sessionTotals().totalCost)}

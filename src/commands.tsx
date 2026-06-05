@@ -49,6 +49,17 @@ function openInBrowser(filePath: string): void {
   } catch { /* silently fail */ }
 }
 
+/** 线性插值百分位数，输入须为有序数组 */
+function computePercentile(sortedArr: number[], p: number): number | null {
+  if (sortedArr.length === 0) return null
+  if (sortedArr.length === 1) return sortedArr[0]
+  const idx = (p / 100) * (sortedArr.length - 1)
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return sortedArr[lo]
+  return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo)
+}
+
 function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
   const map = new Map<string, ModelPerfStats>()
   for (const entry of logs) {
@@ -64,8 +75,11 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
         latencyCount: 0,
         totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheWrite: 0, totalCost: 0,
         avgTTFT: null, maxTTFT: null, minTTFT: null,
+        p50TTFT: null, p95TTFT: null, p99TTFT: null,
         avgTPS: null, maxTPS: null, minTPS: null,
         avgLatency: null, maxLatency: null, minLatency: null,
+        p50Latency: null, p95Latency: null, p99Latency: null,
+        cacheHitRate: null,
       }
       map.set(key, s)
     }
@@ -100,7 +114,41 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
       s.minLatency = s.minLatency != null ? Math.min(s.minLatency, entry.latency_ms) : entry.latency_ms
     }
   }
-  return Array.from(map.values())
+
+  // 分位数后处理：需要收集每个模型的所有样本然后计算
+  // 注： 此处采用单次遍历日志重新收集分数据，需要两次遍历
+  const ttftBuckets = new Map<string, number[]>()
+  const latBuckets = new Map<string, number[]>()
+  for (const entry of logs) {
+    const key = entry.model
+    if (entry.ttft_ms != null) {
+      const arr = ttftBuckets.get(key) ?? []
+      arr.push(entry.ttft_ms)
+      ttftBuckets.set(key, arr)
+    }
+    if (entry.latency_ms != null) {
+      const arr = latBuckets.get(key) ?? []
+      arr.push(entry.latency_ms)
+      latBuckets.set(key, arr)
+    }
+  }
+
+  const result = Array.from(map.values())
+  for (const s of result) {
+    const ttftArr = [...(ttftBuckets.get(s.model) ?? [])].sort((a, b) => a - b)
+    s.p50TTFT = computePercentile(ttftArr, 50)
+    s.p95TTFT = computePercentile(ttftArr, 95)
+    s.p99TTFT = computePercentile(ttftArr, 99)
+
+    const latArr = [...(latBuckets.get(s.model) ?? [])].sort((a, b) => a - b)
+    s.p50Latency = computePercentile(latArr, 50)
+    s.p95Latency = computePercentile(latArr, 95)
+    s.p99Latency = computePercentile(latArr, 99)
+
+    const denom = s.totalInput + s.totalCacheRead
+    s.cacheHitRate = denom > 0 ? (s.totalCacheRead / denom) * 100 : null
+  }
+  return result
 }
 
 
