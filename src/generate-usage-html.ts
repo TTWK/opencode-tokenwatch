@@ -203,18 +203,16 @@ function renderModelChart(chart) {
       },
       {
         name: 'TPS',
-        type: 'line',
+        type: 'scatter',
         yAxisIndex: 1,
         data: modelTps,
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: { color: '#FFB800', width: 2 },
+        symbol: 'diamond',
+        symbolSize: function(val) { return val != null && val > 0 ? 13 : 0; },
         itemStyle: { color: '#FFB800' },
         label: {
           show: true,
           position: 'right',
-          formatter: function(p) { return p.value != null ? p.value.toFixed(1) : ''; },
+          formatter: function(p) { return p.value != null && p.value > 0 ? p.value.toFixed(1) : ''; },
           color: '#FFB800', fontSize: 10
         }
       }
@@ -228,87 +226,111 @@ function renderModelChart(chart) {
 function renderScatterChartInit(data: CombinedReportData): string {
   if (data.perfSummary.length === 0) return ""
 
-  const providerColors: Record<string, string> = {
-    opencode: "#00F593", deepseek: "#00D1FF", nvidia: "#B545FF", modelscope: "#FFB800",
-  }
-
-  const scatterData = data.perfSummary.map(p => {
-    // Bug fix: 分母补入 cacheRead/cacheWrite，cost 由所有 token 产生（含缓存）
-    // 原公式仅用 input+output，高缓存场景下分母偏小，costPer1K 虚高
-    const billable = p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite
-    const costPer1K = billable > 0 ? (p.totalCost / billable) * 1000 : 0
-    return {
-      name: p.model,
-      provider: p.providerID,
-      tps: p.avgTPS,
-      value: [p.avgTTFT != null && p.avgTTFT > 0 ? p.avgTTFT : 0.01, costPer1K, p.requestCount]
-    }
+  // 按 TPS 降序排列（null TPS 放末尾），让最快的模型显示在最上方
+  const sorted = [...data.perfSummary].sort((a, b) => {
+    if (a.avgTPS == null && b.avgTPS == null) return 0
+    if (a.avgTPS == null) return 1
+    if (b.avgTPS == null) return -1
+    return b.avgTPS - a.avgTPS
   })
 
+  const names = sorted.map(p => p.model)
+  const tpsValues = sorted.map(p => p.avgTPS ?? 0)
+  const ttftValues = sorted.map(p => p.avgTTFT ?? 0)
+  const costValues = sorted.map(p => {
+    const billable = p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite
+    return billable > 0 ? (p.totalCost / billable) * 1000 : 0
+  })
+  const hitRates = sorted.map(p => p.cacheHitRate ?? 0)
+  const reqCounts = sorted.map(p => p.requestCount)
+
   return `
-var scatterData = ${JSON.stringify(scatterData)};
-var providerColors = ${JSON.stringify(providerColors)};
+var effNames = ${JSON.stringify(names)};
+var effTps   = ${JSON.stringify(tpsValues)};
+var effTtft  = ${JSON.stringify(ttftValues)};
+var effCost  = ${JSON.stringify(costValues)};
+var effHit   = ${JSON.stringify(hitRates)};
+var effReq   = ${JSON.stringify(reqCounts)};
 
 function initScatterChart() {
   var el = document.getElementById('scatter-chart');
   if (!el) return;
   var chart = echarts.init(el);
   window.scatterChart = chart;
+
+  // TPS 越高越绿，越低越紫，无数据为灰
+  var maxTps = Math.max.apply(null, effTps.filter(function(v){ return v > 0; })) || 1;
+  var barColors = effTps.map(function(v) {
+    if (v <= 0) return '#444455';
+    var r = v / maxTps;
+    if (r >= 0.8) return '#00F593';
+    if (r >= 0.5) return '#FFB800';
+    return '#B545FF';
+  });
+
   var option = {
     tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'none' },
       formatter: function(params) {
-        var d = params.data;
-        return '<b>' + params.name + '</b><br/>' +
-          'Provider: ' + (d.provider || '\u2014') + '<br/>' +
-          'TTFT: ' + (d.value[0] != null ? d.value[0].toFixed(1) + 'ms' : '\u2014') + '<br/>' +
-          'TPS: ' + (d.tps != null ? d.tps.toFixed(1) : '\u2014') + '<br/>' +
-          'Cost/1K: $' + d.value[1].toFixed(4) + '<br/>' +
-          'Requests: ' + d.value[2];
+        var i = params[0].dataIndex;
+        var tps  = effTps[i]  > 0 ? effTps[i].toFixed(1)  + ' tok/s' : '\u2014';
+        var ttft = effTtft[i] > 0 ? effTtft[i].toFixed(0) + ' ms'    : '\u2014';
+        var cost = effCost[i] > 0 ? '$' + effCost[i].toFixed(4) + '/1K' : '\u2014';
+        var hit  = effHit[i]  > 0 ? effHit[i].toFixed(1)  + '%'     : '\u2014';
+        return '<b>' + effNames[i] + '</b><br/>' +
+          '\u25B6 TPS: '        + tps  + '<br/>' +
+          '\u23F1 TTFT: '       + ttft + '<br/>' +
+          '\uD83D\uDCB0 Cost/1K: ' + cost + '<br/>' +
+          '\uD83D\uDCBE Cache Hit: ' + hit + '<br/>' +
+          'Requests: ' + effReq[i];
       }
     },
-    grid: { left: 80, right: 40, bottom: 60, top: 30 },
+    grid: { left: 20, right: 240, bottom: 30, top: 20, containLabel: true },
     xAxis: {
-      type: 'log',
-      name: 'TTFT (ms)',
-      min: 0.01,
-      nameTextStyle: { color: '#B0B0C0' },
-      axisLabel: { color: '#B0B0C0' },
+      type: 'value',
+      name: 'Avg TPS  (tokens / sec)',
+      nameTextStyle: { color: '#B0B0C0', fontSize: 11 },
+      axisLabel: { color: '#B0B0C0', formatter: function(v) { return v > 0 ? v.toFixed(0) : '0'; } },
       splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
     },
     yAxis: {
-      type: 'value',
-      name: 'Cost per 1K tokens',
-      nameTextStyle: { color: '#B0B0C0' },
-      axisLabel: { color: '#B0B0C0', formatter: function(v) { return '$' + v.toFixed(4); } },
-      splitLine: { lineStyle: { color: '#2A2A35', type: 'dashed' } }
+      type: 'category',
+      data: effNames,
+      inverse: true,
+      axisLabel: {
+        color: '#E0E0F0',
+        fontSize: 11,
+        formatter: function(v) { return v.length > 26 ? v.slice(0, 24) + '\u2026' : v; }
+      },
+      axisLine: { show: false },
+      axisTick: { show: false }
     },
     series: [{
-      type: 'scatter',
-      data: scatterData.map(function(d) {
-        return {
-          value: d.value,
-          name: d.name,
-          provider: d.provider,
-          tps: d.tps,
-          itemStyle: { color: providerColors[d.provider] || '#B545FF' }
-        };
+      type: 'bar',
+      data: effTps.map(function(v, i) {
+        return { value: v > 0 ? v : 0.001, itemStyle: { color: barColors[i], borderRadius: [0, 4, 4, 0] } };
       }),
-      symbolSize: function(val) {
-        return Math.max(8, Math.min(40, Math.sqrt(val[2]) * 3));
-      },
-      itemStyle: { opacity: 0.8 },
+      barMaxWidth: 22,
       label: {
         show: true,
-        formatter: function(p) { return p.name; },
         position: 'right',
-        color: '#B0B0C0',
-        fontSize: 10
+        color: '#E0E0F0',
+        fontSize: 10,
+        formatter: function(p) {
+          var i = p.dataIndex;
+          var parts = [effTps[i] > 0 ? effTps[i].toFixed(1) + ' t/s' : '\u2014'];
+          if (effTtft[i] > 0) parts.push('TTFT ' + effTtft[i].toFixed(0) + 'ms');
+          if (effCost[i] > 0) parts.push('\u0024' + effCost[i].toFixed(4) + '/1K');
+          return parts.join('   ');
+        }
       }
     }]
   };
   chart.setOption(option);
   chart.resize();
-}`
+}
+`
 }
 
 function providerBorderColor(provider: string): string {
