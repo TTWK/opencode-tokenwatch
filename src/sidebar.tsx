@@ -241,6 +241,10 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
             } else if (p.state?.status === "error" && p.state?.error) {
               dist.toolResult = (dist.toolResult ?? 0) + estimateTokens(p.state.error)
             }
+          } else if (p.type === "text" && p.text) {
+            // Bug fix: assistant text part（主要 LLM 回复内容）之前未计入分布
+            // 此处用 estimateTokens 估算，最终 dist.output 会被下方真实 tokens.output 覆盖
+            dist.output = (dist.output ?? 0) + estimateTokens(p.text)
           } else if (p.type === "reasoning") {
             dist.agent = (dist.agent ?? 0) + estimateTokens(p.text ?? "")
           } else if (p.type === "subtask") {
@@ -248,12 +252,25 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
           }
         }
         const tokens = (msg as any).tokens
+        // 真实 output token 数优先：覆盖上面的 text part 估算
         if (tokens?.output) dist.output = (dist.output ?? 0) + tokens.output
       }
     }
 
+    // Bug fix: 添加 other 兜底桶（参考官方 session-context-breakdown.ts）
+    // 使用真实 input token 数减去各桶估算值，确保分布总和对齐
+    const realInput = sessionTotals().totalInput
+    if (realInput > 0) {
+      const estimated = (dist.system ?? 0) + (dist.user ?? 0)
+        + (dist.agent ?? 0) + (dist.toolCall ?? 0) + (dist.toolResult ?? 0)
+      const other = realInput - estimated
+      // 只在差值超过 50 token 时展示，避免估算误差噪音
+      if (other > 50) dist.other = other
+    }
+
     return dist
   })
+
 
   const toggle = {
     global: () => setCollapse(p => { const n = { ...p, global: !p.global }; saveCollapseState(api, n); return n }),

@@ -89,9 +89,9 @@ class PerfTracker {
     const tps = (genMs !== null && genMs > 0 && outputTokens > 0)
       ? (outputTokens / genMs) * 1000
       : null
-    const tpsFallback = (tps === null && latencyMs > 0 && outputTokens > 0)
-      ? (outputTokens / latencyMs) * 1000
-      : null
+    // Bug fix: 移除 TPS fallback。
+    // 原 fallback 用 latencyMs（completed-created，含排队+TTFT）计算 TPS，
+    // 会使结果严重低估（约 40%+）。null 表示"无可靠数据"比虚假数字更好。
 
     this.firstPartTimes.delete(messageID)
 
@@ -102,7 +102,7 @@ class PerfTracker {
       modelID,
       sessionID,
       ttft_ms: ttftMs,
-      tps: tps ?? tpsFallback,
+      tps: tps,          // 只在有可靠 genMs 时才有值
       latency_ms: latencyMs,
       inputTokens,
       outputTokens,

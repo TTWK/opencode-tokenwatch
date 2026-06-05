@@ -224,9 +224,10 @@ function renderScatterChartInit(data: CombinedReportData): string {
   }
 
   const scatterData = data.perfSummary.map(p => {
-    const costPer1K = p.totalInput + p.totalOutput > 0
-      ? (p.totalCost / (p.totalInput + p.totalOutput)) * 1000
-      : 0
+    // Bug fix: 分母补入 cacheRead/cacheWrite，cost 由所有 token 产生（含缓存）
+    // 原公式仅用 input+output，高缓存场景下分母偏小，costPer1K 虚高
+    const billable = p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite
+    const costPer1K = billable > 0 ? (p.totalCost / billable) * 1000 : 0
     return {
       name: p.model,
       provider: p.providerID,
