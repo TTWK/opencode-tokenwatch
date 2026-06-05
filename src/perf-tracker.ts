@@ -44,6 +44,9 @@ interface MessageRemoveEvent {
 class PerfTracker {
   private firstPartTimes = new Map<string, number>()
   private statsMap = new Map<string, ModelPerfStats>()
+  /** 原始样本串，用于分位数计算，不持久化 */
+  private ttftSamples = new Map<string, number[]>()
+  private latencySamples = new Map<string, number[]>()
 
   handlePartUpdated(event: PartEvent): void {
     if (!event.time?.start || !event.message_id) return
@@ -156,12 +159,19 @@ class PerfTracker {
         avgTTFT: null,
         maxTTFT: null,
         minTTFT: null,
+        p50TTFT: null,
+        p95TTFT: null,
+        p99TTFT: null,
         avgTPS: null,
         maxTPS: null,
         minTPS: null,
         avgLatency: null,
         maxLatency: null,
         minLatency: null,
+        p50Latency: null,
+        p95Latency: null,
+        p99Latency: null,
+        cacheHitRate: null,
       }
       this.statsMap.set(model, stats)
     }
@@ -181,6 +191,10 @@ class PerfTracker {
       stats.avgTTFT = prev !== null ? prev + (entry.ttft_ms - prev) / c : entry.ttft_ms
       stats.maxTTFT = stats.maxTTFT !== null ? Math.max(stats.maxTTFT, entry.ttft_ms) : entry.ttft_ms
       stats.minTTFT = stats.minTTFT !== null ? Math.min(stats.minTTFT, entry.ttft_ms) : entry.ttft_ms
+      // 收集原始样本用于分位数计算
+      const ttftArr = this.ttftSamples.get(model) ?? []
+      ttftArr.push(entry.ttft_ms)
+      this.ttftSamples.set(model, ttftArr)
     }
 
     if (entry.tps !== null) {
@@ -201,23 +215,64 @@ class PerfTracker {
       stats.avgLatency = prev !== null ? prev + (entry.latency_ms - prev) / c : entry.latency_ms
       stats.maxLatency = stats.maxLatency !== null ? Math.max(stats.maxLatency, entry.latency_ms) : entry.latency_ms
       stats.minLatency = stats.minLatency !== null ? Math.min(stats.minLatency, entry.latency_ms) : entry.latency_ms
+      // 收集原始样本用于分位数计算
+      const latArr = this.latencySamples.get(model) ?? []
+      latArr.push(entry.latency_ms)
+      this.latencySamples.set(model, latArr)
     }
+  }
+
+  /** 计算有序数组的指定百分位数（线性插值法） */
+  private percentile(sortedArr: number[], p: number): number | null {
+    if (sortedArr.length === 0) return null
+    if (sortedArr.length === 1) return sortedArr[0]
+    const idx = (p / 100) * (sortedArr.length - 1)
+    const lo = Math.floor(idx)
+    const hi = Math.ceil(idx)
+    if (lo === hi) return sortedArr[lo]
+    return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo)
   }
 
   getSessionStats(): SessionPerfStats {
     let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0
     let totalRequests = 0, totalCost = 0
-    for (const s of this.statsMap.values()) {
+    let weightedHitSum = 0, totalReqForHit = 0
+
+    for (const [model, s] of this.statsMap) {
       totalInput += s.totalInput
       totalOutput += s.totalOutput
       totalCacheRead += s.totalCacheRead
       totalCacheWrite += s.totalCacheWrite
       totalRequests += s.requestCount
       totalCost += s.totalCost
+
+      // 计算每个模型的分位数（需先排序）
+      const ttftArr = [...(this.ttftSamples.get(model) ?? [])].sort((a, b) => a - b)
+      s.p50TTFT = this.percentile(ttftArr, 50)
+      s.p95TTFT = this.percentile(ttftArr, 95)
+      s.p99TTFT = this.percentile(ttftArr, 99)
+
+      const latArr = [...(this.latencySamples.get(model) ?? [])].sort((a, b) => a - b)
+      s.p50Latency = this.percentile(latArr, 50)
+      s.p95Latency = this.percentile(latArr, 95)
+      s.p99Latency = this.percentile(latArr, 99)
+
+      // 模型级缓存命中率
+      const denom = s.totalInput + s.totalCacheRead
+      s.cacheHitRate = denom > 0 ? (s.totalCacheRead / denom) * 100 : null
+
+      // 累加加权命中率（按请求数加权）
+      if (s.cacheHitRate !== null) {
+        weightedHitSum += s.cacheHitRate * s.requestCount
+        totalReqForHit += s.requestCount
+      }
     }
+
+    const weightedCacheHitRate = totalReqForHit > 0 ? weightedHitSum / totalReqForHit : null
+
     return {
       models: Object.fromEntries(this.statsMap),
-      totals: { totalInput, totalOutput, totalCacheRead, totalCacheWrite, totalRequests, totalCost },
+      totals: { totalInput, totalOutput, totalCacheRead, totalCacheWrite, totalRequests, totalCost, weightedCacheHitRate },
     }
   }
 
@@ -244,6 +299,8 @@ class PerfTracker {
   reset(): void {
     this.firstPartTimes.clear()
     this.statsMap.clear()
+    this.ttftSamples.clear()
+    this.latencySamples.clear()
   }
 }
 
