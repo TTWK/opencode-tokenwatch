@@ -290,7 +290,7 @@ function initScatterChart() {
           'Requests: ' + effReq[i];
       }
     },
-    grid: { left: 20, right: 240, bottom: 30, top: 20, containLabel: true },
+    grid: { left: 20, right: 280, bottom: 30, top: 20, containLabel: true },
     xAxis: {
       type: 'value',
       name: 'Avg TPS  (tokens / sec)',
@@ -305,7 +305,7 @@ function initScatterChart() {
       axisLabel: {
         color: '#E0E0F0',
         fontSize: 11,
-        formatter: function(v) { return v.length > 26 ? v.slice(0, 24) + '\u2026' : v; }
+        formatter: function(v) { return v.length > 50 ? v.slice(0, 48) + '\u2026' : v; }
       },
       axisLine: { show: false },
       axisTick: { show: false }

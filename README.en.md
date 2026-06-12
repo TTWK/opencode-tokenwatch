@@ -8,18 +8,17 @@ Real-time token usage, cache analytics & performance dashboard plugin for OpenCo
 
 ## Features
 
-- **Sidebar panel** — Session-level and per-model real-time stats (requests, tokens, cache, latency, cost)
-- **Cache hit rate** — Inline progress bars with color thresholds, trend indicators (↑/↓), and global weighted cache hit rate in the summary row
+- **Sidebar panel** — Session-level and per-model real-time stats (requests, tokens, cache, cost)
+- **Cache hit rate** — Inline color progress bars with trend indicators (↑/↓) and global weighted hit rate
 - **Performance metrics** — TTFT / TPS / End-to-end latency + P50/P95/P99 latency percentiles
-- **Token distribution** — 5-bucket role breakdown (system, user, Agent, Tool and other with fallback and adaptive scaling)
-- **Error rate statistics** — Detects and tracks failed requests (empty token response) and real-time error rate
-- **Model pricing** — Input/cache/output unit prices
+- **Token distribution** — 5-bucket role breakdown (system / user / toolCall / toolResult / output + other fallback)
+- **Error rate tracking** — Detects failed requests (empty token response) and computes real-time error rate
+- **Cost display** — Per-model cost (requires provider billing data)
 - **`/usage` command** — HTML Report → JSON Export → Text Report → Settings
-- **HTML report** — Interactive ECharts dashboard: Token distribution, performance percentiles, error rate analysis, model speed rankings (redesigned from overlapping scatter plots to horizontal bar charts), auto-opened in browser
+- **HTML report** — Interactive ECharts dashboard: token distribution, performance percentiles, TPS horizontal ranking, error rate analysis — auto-opened in browser
+- **Persistent stats** — Performance metrics (TPS/TTFT/latency) written to a dedicated JSON file that accumulates forever, unaffected by log rotation
 - **Multi-level collapse** — Panel, models, and sub-blocks collapsible with persisted state
 - **Language switching** — Auto-detect or manually switch between Chinese and English
-- **Per-request tracking** — TTFT/TPS/latency logged to JSONL for report analysis
-- **Adaptive coloring** — Colors auto-derived from theme
 
 ## Install
 
@@ -45,8 +44,8 @@ Add to `opencode.json` or `opencode.jsonc`:
     "opencode-tokenwatch": {
       "sidebar": {
         "showPerformance": true,
-        "showPricing": false,
-        "showTokenDistribution": false,
+        "showPricing": true,
+        "showTokenDistribution": true,
         "showTrend": true
       },
       "language": "auto"
@@ -58,7 +57,7 @@ Add to `opencode.json` or `opencode.jsonc`:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `sidebar.showPerformance` | boolean | `true` | Show TTFT/TPS/latency |
-| `sidebar.showPricing` | boolean | `true` | Show model pricing |
+| `sidebar.showPricing` | boolean | `true` | Show request cost |
 | `sidebar.showTokenDistribution` | boolean | `true` | Show token distribution |
 | `sidebar.showTrend` | boolean | `true` | Show trend indicator |
 | `language` | `"auto"` / `"zh"` / `"en"` | `"auto"` | UI language |
@@ -73,6 +72,14 @@ In OpenCode TUI, run `/usage`:
 - **JSON Export** — Exports full usage data to `~/.opencode/reports/`
 - **Text Report** — Exports Markdown report to `~/.opencode/reports/`
 - **Settings** — Toggle sidebar blocks, switch language
+
+## Data Files
+
+| File | Path | Description |
+|------|------|-------------|
+| JSONL log | `~/.opencode/tokenwatch.jsonl` | Raw per-request log, auto-rotated at 5 MB |
+| Aggregated stats | `~/.opencode/tokenwatch-stats.json` | Persistent performance stats, accumulates forever |
+| Report output | `~/.opencode/reports/` | HTML / JSON / Markdown reports |
 
 ## Requirements
 

@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { existsSync, statSync } from "node:fs"
+import { updatePersistedStats } from "./stats-store.js"
 
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
 
@@ -122,6 +123,7 @@ class PerfTracker {
     try {
       // Risk fix: JSONL 日志轮转保护，防止长期使用后文件无限增长
       // 超过 5MB 时截断，保留最新 2000 行
+      // 注意：轮转前先调用 updatePersistedStats，确保被轮转行的数据已持久化
       const MAX_SIZE = 5 * 1024 * 1024  // 5 MB
       const KEEP_LINES = 2000
       if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > MAX_SIZE) {
@@ -132,6 +134,9 @@ class PerfTracker {
     } catch {
       // Silently fail — logging is non-critical
     }
+    // 无论 JSONL 写入是否成功，都尝试更新持久化聚合统计
+    // 这样即使日志被轮转，历史统计数据也永不丢失
+    updatePersistedStats(entry)
   }
 
   handleMessageRemoved(event: MessageRemoveEvent): void {
@@ -301,6 +306,35 @@ class PerfTracker {
     this.statsMap.clear()
     this.ttftSamples.clear()
     this.latencySamples.clear()
+  }
+
+  loadSession(sessionID: string): void {
+    this.firstPartTimes.clear()
+    this.statsMap.clear()
+    this.ttftSamples.clear()
+    this.latencySamples.clear()
+
+    if (!sessionID) return
+
+    try {
+      if (!existsSync(LOG_PATH)) return
+      const content = readFileSync(LOG_PATH, "utf-8").trim()
+      if (!content) return
+      const lines = content.split("\n")
+      for (const line of lines) {
+        if (!line) continue
+        try {
+          const entry = JSON.parse(line) as LogEntry
+          if (entry.sessionID === sessionID) {
+            this.updateStats(entry.model, entry)
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    } catch {
+      // Non-critical loading failure
+    }
   }
 }
 

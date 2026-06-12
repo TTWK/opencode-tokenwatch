@@ -9,6 +9,7 @@ import type { SupportedLanguage } from "./i18n.js"
 import type { SidebarConfig } from "./sidebar.jsx"
 import { readLogs } from "./perf-tracker.js"
 import type { LogEntry, ModelPerfStats } from "./formatter.js"
+import { readPersistedStats } from "./stats-store.js"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -154,7 +155,12 @@ function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
 
 async function buildCombinedData(api: TuiPluginApi, filters: UsageFilters = {}): Promise<CombinedReportData> {
   const report = await getUsageReport(filters)
-  const logs = readLogs(1000)
+  // perfLogs: 仅用于 JSON 导出参考，保持适当窗口即可
+  const logs = readLogs(200)
+
+  // perfSummary: 使用持久化聚合统计，包含自插件安装以来的全量历史数据
+  // 不再受 readLogs 窗口限制，即使 JSONL 被轮转，历史指标也不会丢失
+  const perfSummary = readPersistedStats()
 
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -169,7 +175,7 @@ async function buildCombinedData(api: TuiPluginApi, filters: UsageFilters = {}):
   return {
     ...report,
     perfLogs: logs,
-    perfSummary: aggregatePerfStats(logs),
+    perfSummary,
     meta,
   }
 }
@@ -230,6 +236,7 @@ function showHtmlReportRangeMenu(api: TuiPluginApi, dialog: TuiDialogStack): voi
 }
 
 function showUsageMenu(api: TuiPluginApi, dialog: TuiDialogStack): void {
+  try { setLanguage(loadConfigFromStore(api).language) } catch {}
   dialog.replace(() => (
     <api.ui.DialogSelect
       title={t("panelTitle")}

@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js"
+import { createSignal, createEffect, onCleanup } from "solid-js"
 import type { TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { registerCommands } from "./commands.jsx"
 import { createPerfTracker } from "./perf-tracker.js"
@@ -103,36 +103,98 @@ const tui: TuiPluginModule["tui"] = async (api) => {
 
         if (session_id && session_id !== currentSlotSessionID) {
           currentSlotSessionID = session_id
-          perfTracker.reset()
+          perfTracker.loadSession(session_id)
 
           let loaded: TokenMessage[] = []
           try {
             const saved = api.kv?.get?.(kvKey(session_id)) as TokenMessage[] | undefined
             if (saved && saved.length > 0) loaded = saved
           } catch {}
-
-          if (loaded.length === 0) {
-            const existing = api.state.session.messages(session_id)
-            for (const msg of existing) {
-              if ((msg as any).role !== "assistant") continue
-              const tokens = (msg as any).tokens
-              if (!tokens) continue
-              loaded.push({
-                id: (msg as any).id,
-                sessionID: session_id,
-                providerID: (msg as any).providerID ?? "unknown",
-                modelID: (msg as any).modelID ?? "unknown",
-                inputTokens: tokens?.input ?? 0,
-                outputTokens: tokens?.output ?? 0,
-                reasoningTokens: tokens?.reasoning ?? 0,
-                cacheRead: tokens?.cache?.read ?? 0,
-                cacheWrite: tokens?.cache?.write ?? 0,
-                cost: (msg as any).cost ?? 0,
-              })
-            }
-          }
           setAllTokenMessages(loaded)
         }
+
+        // 引入 createEffect 监听历史会话消息在后台异步加载完毕后的变化
+        // 由于历史会话加载可能是异步的，初次检查 messages 可能为空且底层并非响应式数据源，
+        // 故采用短期高频轮询，直到数据加载完成或超时。
+        createEffect(() => {
+          if (!session_id) return
+
+          let timer: any = null
+          let pollCount = 0
+          const maxPolls = 50 // 最多轮询 10 秒 (50 * 200ms)
+
+          const checkAndPopulate = () => {
+            const existing = api.state.session.messages(session_id)
+            if (!existing || existing.length === 0) return false
+
+            setAllTokenMessages((prev) => {
+              let changed = false
+              const next = [...prev]
+              for (const msg of existing) {
+                if ((msg as any).role !== "assistant") continue
+                const tokens = (msg as any).tokens
+                if (!tokens) continue
+
+                const id = (msg as any).id
+                const idx = next.findIndex(m => m.id === id)
+                const tokenMsg: TokenMessage = {
+                  id,
+                  sessionID: session_id,
+                  providerID: (msg as any).providerID ?? "unknown",
+                  modelID: (msg as any).modelID ?? "unknown",
+                  inputTokens: tokens?.input ?? 0,
+                  outputTokens: tokens?.output ?? 0,
+                  reasoningTokens: tokens?.reasoning ?? 0,
+                  cacheRead: tokens?.cache?.read ?? 0,
+                  cacheWrite: tokens?.cache?.write ?? 0,
+                  cost: (msg as any).cost ?? 0,
+                }
+
+                if (idx >= 0) {
+                  const cur = next[idx]
+                  if (
+                    cur.inputTokens !== tokenMsg.inputTokens ||
+                    cur.outputTokens !== tokenMsg.outputTokens ||
+                    cur.reasoningTokens !== tokenMsg.reasoningTokens ||
+                    cur.cacheRead !== tokenMsg.cacheRead ||
+                    cur.cacheWrite !== tokenMsg.cacheWrite ||
+                    cur.cost !== tokenMsg.cost
+                  ) {
+                    next[idx] = tokenMsg
+                    changed = true
+                  }
+                } else {
+                  next.push(tokenMsg)
+                  changed = true
+                }
+              }
+
+              if (changed) {
+                persistToKv(session_id, next)
+                return next
+              }
+              return prev
+            })
+            return true
+          }
+
+          const hasMessages = checkAndPopulate()
+          if (!hasMessages) {
+            timer = setInterval(() => {
+              pollCount++
+              if (checkAndPopulate() || pollCount >= maxPolls) {
+                clearInterval(timer)
+                timer = null
+              }
+            }, 200)
+          }
+
+          onCleanup(() => {
+            if (timer) {
+              clearInterval(timer)
+            }
+          })
+        })
 
         return <TokenWatchPanel api={api} theme={api.theme} perfTracker={perfTracker} messages={() => api.state.session.messages(session_id)} allTokenMessages={allTokenMessages} />
       },

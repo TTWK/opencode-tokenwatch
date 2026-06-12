@@ -8,18 +8,17 @@ OpenCode CLI 的实时 Token 用量统计、缓存分析与性能指标插件。
 
 ## 功能
 
-- **侧边栏面板** — 会话级与按模型的实时统计（请求数、Token、缓存、耗时、成本）
-- **缓存命中率** — 模型行内彩色进度条，带趋势指示器（↑/↓），全局总计行显示**全局加权命中率**
+- **侧边栏面板** — 会话级与按模型的实时统计（请求数、Token、缓存、成本）
+- **缓存命中率** — 模型行内彩色进度条，带趋势指示器（↑/↓），全局总计行显示**加权命中率**
 - **性能指标** — TTFT / TPS / 端到端延迟 + P50/P95/P99 延迟分位数
-- **Token 分布** — 5 桶角色分解（系统、用户、Agent、Tool 以及 other 兜底，支持自适应缩放）
+- **Token 分布** — 5 桶角色分解（system / user / toolCall / toolResult / output + other 兜底）
 - **错误率统计** — 识别并统计失败请求（空 Token 响应），实时计算错误率
-- **模型定价** — 输入/缓存/输出单价
+- **成本展示** — 按模型显示 cost（需 provider 返回计费数据）
 - **`/usage` 命令** — HTML 报告 → JSON 导出 → 文本报告 → 设置
-- **HTML 报告** — 交互式 ECharts 仪表盘：Token 分布、性能分位数、错误率分析、模型效率水平排名（已重构重叠散点图为水平条形对比图），自动在浏览器打开
+- **HTML 报告** — 交互式 ECharts 仪表盘：Token 分布、性能分位数、TPS 水平排名、错误率分析，自动在浏览器打开
+- **持久化统计** — 性能指标（TPS/TTFT/延迟）写入独立 JSON 文件，永久累积，不受日志轮转影响
 - **多级折叠** — 面板、模型、子区块均可折叠，状态持久化
-- **语言切换** — 中英双语，可跟随系统或手动切换
-- **性能追踪** — 每次请求的 TTFT/TPS/延迟写入 JSONL，用于报告分析
-- **自适应配色** — 从主题色自动衍生
+- **语言切换** — 中英双语，跟随系统或手动切换
 
 ## 安装
 
@@ -45,8 +44,8 @@ npm install opencode-tokenwatch
     "opencode-tokenwatch": {
       "sidebar": {
         "showPerformance": true,
-        "showPricing": false,
-        "showTokenDistribution": false,
+        "showPricing": true,
+        "showTokenDistribution": true,
         "showTrend": true
       },
       "language": "auto"
@@ -58,7 +57,7 @@ npm install opencode-tokenwatch
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `sidebar.showPerformance` | boolean | `true` | 显示 TTFT/TPS/延迟 |
-| `sidebar.showPricing` | boolean | `true` | 显示模型定价 |
+| `sidebar.showPricing` | boolean | `true` | 显示请求成本 |
 | `sidebar.showTokenDistribution` | boolean | `true` | 显示 Token 分布 |
 | `sidebar.showTrend` | boolean | `true` | 显示趋势指示器 |
 | `language` | `"auto"` / `"zh"` / `"en"` | `"auto"` | 界面语言 |
@@ -73,6 +72,14 @@ npm install opencode-tokenwatch
 - **JSON 导出** — 导出完整用量数据至 `~/.opencode/reports/`
 - **文本报告** — 导出 Markdown 格式至 `~/.opencode/reports/`
 - **设置** — 开关侧边栏显示项、切换语言
+
+## 数据文件
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| JSONL 日志 | `~/.opencode/tokenwatch.jsonl` | 原始请求日志，超 5MB 自动轮转 |
+| 聚合统计 | `~/.opencode/tokenwatch-stats.json` | 持久化性能统计，永久累积 |
+| 报告输出 | `~/.opencode/reports/` | HTML / JSON / Markdown 报告 |
 
 ## 系统要求
 
