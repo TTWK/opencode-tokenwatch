@@ -134,8 +134,7 @@ const tui: TuiPluginModule["tui"] = async (api) => {
           setAllTokenMessages(loaded)
         }
 
-        const messages = api.state.session.messages(session_id)
-        return <TokenWatchPanel api={api} theme={api.theme} perfTracker={perfTracker} messages={messages} allTokenMessages={allTokenMessages()} />
+        return <TokenWatchPanel api={api} theme={api.theme} perfTracker={perfTracker} messages={() => api.state.session.messages(session_id)} allTokenMessages={allTokenMessages} />
       },
     },
   })

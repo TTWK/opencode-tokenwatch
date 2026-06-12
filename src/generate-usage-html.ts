@@ -35,11 +35,15 @@ function renderKpiCards(data: CombinedReportData): string {
   const s = data.summary
   const hitRate = cacheHitRate(s.inputTokens, s.cacheRead)
   const hitRatePct = fmtPercent(hitRate)
-  const avgTpsRaw = s.requestCount > 0 && data.perfSummary.length > 0
-    ? data.perfSummary.reduce((sum, p) => sum + (p.avgTPS ?? 0) * p.requestCount, 0) /
-      data.perfSummary.reduce((sum, p) => sum + p.requestCount, 0)
-    : 0
-  const avgTps = avgTpsRaw ? avgTpsRaw.toFixed(1) : '—'
+  let tpsSum = 0, tpsReqs = 0;
+  for (const p of data.perfSummary) {
+    if (p.avgTPS != null && p.avgTPS > 0) {
+      tpsSum += p.avgTPS * p.requestCount;
+      tpsReqs += p.requestCount;
+    }
+  }
+  const avgTpsRaw = tpsReqs > 0 ? tpsSum / tpsReqs : 0
+  const avgTps = tpsReqs > 0 ? avgTpsRaw.toFixed(1) : '—'
   const isHighCache = hitRate >= 0.5
 
   const errors = (data as any).errors as { errorRate: number; failedCount: number } | undefined
@@ -342,14 +346,23 @@ function renderProviderCards(data: CombinedReportData): string {
   return data.providers.map(p => {
     const modelCount = data.models.filter(m => m.provider === p.provider).length
     const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider)
-    const avgTtft = perfItems.length > 0
-      ? perfItems.reduce((s, x) => s + (x.avgTTFT ?? 0) * x.requestCount, 0) /
-        perfItems.reduce((s, x) => s + x.requestCount, 0)
-      : null
-    const avgTps = perfItems.length > 0
-      ? perfItems.reduce((s, x) => s + (x.avgTPS ?? 0) * x.requestCount, 0) /
-        perfItems.reduce((s, x) => s + x.requestCount, 0)
-      : null
+    let ttftSum = 0, ttftReqs = 0;
+    for (const x of perfItems) {
+      if (x.avgTTFT != null && x.avgTTFT > 0) {
+        ttftSum += x.avgTTFT * x.requestCount;
+        ttftReqs += x.requestCount;
+      }
+    }
+    const avgTtft = ttftReqs > 0 ? ttftSum / ttftReqs : null;
+
+    let tpsSum = 0, tpsReqs = 0;
+    for (const x of perfItems) {
+      if (x.avgTPS != null && x.avgTPS > 0) {
+        tpsSum += x.avgTPS * x.requestCount;
+        tpsReqs += x.requestCount;
+      }
+    }
+    const avgTps = tpsReqs > 0 ? tpsSum / tpsReqs : null;
 
     return `
     <div class="provider-card" style="border-color:${providerBorderColor(p.provider)}">

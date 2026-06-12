@@ -94,13 +94,13 @@ interface TokenWatchPanelProps {
   api: TuiPluginApi
   theme: TuiTheme
   perfTracker: PerfTracker
-  messages: readonly any[]
-  allTokenMessages: TokenMessage[]
+  messages: () => readonly any[]
+  allTokenMessages: () => TokenMessage[]
 }
 
 export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const { api, theme, perfTracker } = props
-  const getMessages = () => props.messages
+  const getMessages = () => props.messages()
   const [config, setConfig] = createSignal<SidebarConfig>(loadConfig(api))
   let knownCfgVer = api.kv?.get?.("tokenwatch-config-version") as number | undefined
 
@@ -125,7 +125,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
   const modelStats = createMemo(() => {
     const map = new Map<string, ModelAgg>()
-    for (const msg of props.allTokenMessages) {
+    for (const msg of props.allTokenMessages()) {
       const key = `${msg.providerID}/${msg.modelID}`
       let e = map.get(key)
       if (!e) {
@@ -160,7 +160,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
       if (denom === 0) return { key, rate: 0, msgs: [] as TokenMessage[] }
 
       const msgs: TokenMessage[] = []
-      for (const msg of props.allTokenMessages) {
+      for (const msg of props.allTokenMessages()) {
         const pk = `${msg.providerID}/${msg.modelID}`
         if (pk !== key) continue
         msgs.push(msg)
@@ -231,6 +231,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
       } else if (role === "assistant") {
         let parts: readonly any[] = []
         try { parts = api.state.part((msg as any).id) } catch { continue }
+        let msgEstimatedOutput = 0
         for (const p of parts) {
           if (p.type === "tool") {
             let rawInput = ""
@@ -242,18 +243,19 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
               dist.toolResult = (dist.toolResult ?? 0) + estimateTokens(p.state.error)
             }
           } else if (p.type === "text" && p.text) {
-            // Bug fix: assistant text part（主要 LLM 回复内容）之前未计入分布
-            // 此处用 estimateTokens 估算，最终 dist.output 会被下方真实 tokens.output 覆盖
-            dist.output = (dist.output ?? 0) + estimateTokens(p.text)
+            msgEstimatedOutput += estimateTokens(p.text)
           } else if (p.type === "reasoning") {
-            dist.agent = (dist.agent ?? 0) + estimateTokens(p.text ?? "")
+            msgEstimatedOutput += estimateTokens(p.text ?? "")
           } else if (p.type === "subtask") {
-            dist.agent = (dist.agent ?? 0) + estimateTokens(p.prompt || p.description || "")
+            msgEstimatedOutput += estimateTokens(p.prompt || p.description || "")
           }
         }
         const tokens = (msg as any).tokens
-        // 真实 output token 数优先：覆盖上面的 text part 估算
-        if (tokens?.output) dist.output = (dist.output ?? 0) + tokens.output
+        if (tokens?.output !== undefined || tokens?.reasoning !== undefined) {
+          dist.output = (dist.output ?? 0) + (tokens?.output ?? 0) + (tokens?.reasoning ?? 0)
+        } else {
+          dist.output = (dist.output ?? 0) + msgEstimatedOutput
+        }
       }
     }
 
@@ -262,7 +264,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
     const realInput = sessionTotals().totalInput
     if (realInput > 0) {
       const estimated = (dist.system ?? 0) + (dist.user ?? 0)
-        + (dist.agent ?? 0) + (dist.toolCall ?? 0) + (dist.toolResult ?? 0)
+        + (dist.toolCall ?? 0) + (dist.toolResult ?? 0)
       const other = realInput - estimated
       // 只在差值超过 50 token 时展示，避免估算误差噪音
       if (other > 50) dist.other = other
