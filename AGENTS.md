@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-06-12（v0.3.1）
+> 最后更新：2026-06-29（v0.3.2）
 
 ---
 
@@ -10,7 +10,7 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.3.1`
+- **版本**：`0.3.2`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
 - **构建工具**：`tsc`（TypeScript 编译器，无打包器）
@@ -81,6 +81,7 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 
 - 实现 `TuiPluginModule.tui` 接口
 - 维护 `allTokenMessages: Signal<TokenMessage[]>`（当前 session 全量消息）
+- **无效数据过滤**：`checkAndPopulate` 加 `tokens.total > 0` 检查，与事件处理器保持一致
 - **session 切换时**：从 KV Store 恢复历史消息，若无则从 `api.state.session.messages()` 重建
 - **数据持久化**：每次消息更新写入 KV Store（key = `tokenwatch-msgs-{sessionID}`）
 - 写入时使用事件中的 sessionID 替代 currentSlotSessionID，避免时序竞态问题
@@ -88,6 +89,8 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 ### `src/sidebar.tsx` — 侧边栏 UI
 
 - 基于 SolidJS 响应式系统，`createMemo` 懒计算
+- **模型排序**：按最近调用时间降序（最后一条消息的数组索引），而非 Token 总量或 TPS，切换模型时当前焦点模型始终在顶部
+- **供应商名称截断**：超过 12 字符时省略显示（`…`），避免长供应商名撑破布局
 - **tokenDistribution**：从消息 parts 估算 Token 分布（chars/4 经验公式）
   - 5 桶：system / user / toolCall / toolResult / output + other 兜底桶，超出真实 input 时比例收缩
 - **缓存命中率公式**：`cacheRead / (cacheRead + input)`
@@ -96,6 +99,7 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 
 ### `src/perf-tracker.ts` — 性能追踪
 
+- **无效数据过滤**：`handleMessageUpdated` 跳过全零 token 请求，不写 JSONL / stats-store
 - **TTFT**：监听 `message.part.updated`，取最早 part 的 `time.start`（`Math.min`）
 - **TPS**：`outputTokens / genMs * 1000`（genMs = completed - firstPartTime），无可靠 genMs 时为 null
 - **平均值**：Welford 在线均值，分母使用独立的 `ttftCount` / `tpsCount` 计数器
@@ -196,6 +200,13 @@ const tokenTotal = (msg) =>
 | 🟡 P1 | `sidebar.tsx` | assistant text part 未计入 tokenDistribution | **已修复** |
 | 🟡 P1 | `sidebar.tsx` | tokenDistribution 缺 `other` 兜底桶 | **已修复** |
 | 🟡 P1 | `generate-usage-html.ts` | costPer1K 分母未含 cacheRead | **已修复** |
+| 🟡 P1 | `sidebar.tsx` | 模型排序按 Token 总量而非最近调用时间 | **已修复（按最近调用降序）** |
+| 🟡 P1 | `sidebar.tsx` | 供应商名称过长撑破布局 | **已修复（12字符截断+省略号）** |
+| 🟡 P1 | `perf-tracker.ts` | 全零 token 请求写入日志/统计 | **已修复（跳过无效数据）** |
+| 🟡 P1 | `tui.tsx` | 历史重建未过滤全零 token 消息 | **已修复（tokens.total > 0）** |
+| 🟡 P1 | `sidebar.tsx` | modelStats 未过滤全零 token | **已修复（二次保障过滤）** |
+| 🟡 P1 | `generate-usage-html.ts` | HTML 报告含无效零 token 记录 | **已修复（各渲染函数过滤）** |
+| 🟡 P1 | `commands.tsx` | aggregatePerfStats 未跳过全零条目 | **已修复** |
 
 ---
 
@@ -269,4 +280,4 @@ npm run release:check
 
 ---
 
-*本文档由 Antigravity CLI 于 2026-06-12 更新，版本 v0.3.1。*
+*本文档于 2026-06-29 更新，版本 v0.3.2。*

@@ -64,6 +64,8 @@ function computePercentile(sortedArr: number[], p: number): number | null {
 function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
   const map = new Map<string, ModelPerfStats>()
   for (const entry of logs) {
+    // 过滤掉全零无效条目：token 均为 0 表示请求失败或未完成
+    if (entry.inputTokens + entry.outputTokens + entry.cacheReadTokens + entry.cacheWriteTokens === 0) continue
     const key = entry.model
     let s = map.get(key)
     if (!s) {

@@ -23,7 +23,8 @@ function cacheHitRate(input: number, cacheRead: number): number {
 }
 
 function sortModelsByUsage(models: ModelBreakdownItem[]): ModelBreakdownItem[] {
-  return [...models].sort((a, b) => b.totalTokens - a.totalTokens)
+  // 过滤掉 totalTokens=0 的无效模型条目（如会话失败导致全为 0 的记录）
+  return [...models].filter(m => m.totalTokens > 0).sort((a, b) => b.totalTokens - a.totalTokens)
 }
 
 function renderMeta(data: CombinedReportData): string {
@@ -228,10 +229,15 @@ function renderModelChart(chart) {
 }
 
 function renderScatterChartInit(data: CombinedReportData): string {
-  if (data.perfSummary.length === 0) return ""
+  // 过滤掉全零无效条目：无请求或无任何 token 的模型
+  const validPerf = data.perfSummary.filter(p =>
+    p.requestCount > 0 &&
+    (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
+  )
+  if (validPerf.length === 0) return ""
 
   // 按 TPS 降序排列（null TPS 放末尾），让最快的模型显示在最上方
-  const sorted = [...data.perfSummary].sort((a, b) => {
+  const sorted = [...validPerf].sort((a, b) => {
     if (a.avgTPS == null && b.avgTPS == null) return 0
     if (a.avgTPS == null) return 1
     if (b.avgTPS == null) return -1
@@ -425,12 +431,17 @@ function renderDataTable(data: CombinedReportData): string {
 
 /** 渲染 P50/P95/P99 延迟分位数表格 */
 function renderPerfPercentileTable(data: CombinedReportData): string {
-  if (data.perfSummary.length === 0) return ''
+  // 过滤掉无效记录：无请求或 token 全为 0 的模型
+  const validPerf = data.perfSummary.filter(p =>
+    p.requestCount > 0 &&
+    (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
+  )
+  if (validPerf.length === 0) return ''
 
   const fmtMs = (v: number | null | undefined) =>
     v != null ? v.toFixed(0) + 'ms' : '—'
 
-  const rows = data.perfSummary.map(p => {
+  const rows = validPerf.map(p => {
     const hitColor = p.cacheHitRate != null && p.cacheHitRate >= 85 ? 'var(--cache)'
       : p.cacheHitRate != null && p.cacheHitRate >= 70 ? 'var(--tps)' : 'var(--output)'
     return `<tr>
@@ -677,7 +688,10 @@ export function generateUsageHtml(data: CombinedReportData): string {
   const errorStatsStr = renderErrorStatsSection(data)
   const dailyChartJs = renderDailyTrendInit(data)
   const heatmapJs = renderHeatmapInit(data)
-  const hasPerf = data.perfSummary.length > 0
+  const hasPerf = data.perfSummary.some(p =>
+    p.requestCount > 0 &&
+    (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
+  )
   const jsonData = JSON.stringify(data)
 
   return `<!DOCTYPE html>

@@ -124,6 +124,8 @@ interface ModelAgg {
   cacheWrite: number
   totalCost: number
   requestCount: number
+  /** allTokenMessages 数组中该模型最后一条消息的索引，用于「最近调用时间」排序 */
+  lastMessageIndex: number
 }
 
 interface TokenWatchPanelProps {
@@ -182,11 +184,13 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   // ── 数据聚合 ──
   const modelStats = createMemo(() => {
     const map = new Map<string, ModelAgg>()
-    for (const msg of props.allTokenMessages()) {
+    const msgs = props.allTokenMessages()
+    for (let i = 0; i < msgs.length; i++) {
+      const msg = msgs[i]
       const key = `${msg.providerID}/${msg.modelID}`
       let e = map.get(key)
       if (!e) {
-        e = { providerID: msg.providerID, modelID: msg.modelID, totalInput: 0, totalOutput: 0, totalReasoning: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0 }
+        e = { providerID: msg.providerID, modelID: msg.modelID, totalInput: 0, totalOutput: 0, totalReasoning: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0, requestCount: 0, lastMessageIndex: -1 }
         map.set(key, e)
       }
       e.totalInput += msg.inputTokens
@@ -196,8 +200,13 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
       e.cacheWrite += msg.cacheWrite
       e.totalCost += msg.cost
       e.requestCount++
+      e.lastMessageIndex = i  // 追踪该模型最后一条消息的索引（越大 = 越近调用）
     }
-    return Array.from(map.entries()).sort((a, b) => (b[1].totalInput + b[1].totalOutput) - (a[1].totalInput + a[1].totalOutput))
+    return Array.from(map.entries())
+      // 过滤掉全零无效模型（如会话失败导致 token 全为 0 的记录）
+      .filter(([, s]) => s.totalInput + s.totalOutput + s.totalReasoning + s.cacheRead + s.cacheWrite > 0)
+      // 按最近调用时间降序：最后一条消息在数组中索引越大越靠前
+      .sort((a, b) => b[1].lastMessageIndex - a[1].lastMessageIndex)
   })
 
   const sessionTotals = createMemo(() => {
@@ -473,8 +482,14 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                 : RGBA.fromInts(244, 67, 54, 255)
             }
 
-            // 模型名处理：假如总长超过22字符，且格式为 厂商/模型厂商/模型名称，去除中间模型厂商，只留 provider/modelname 格式
-            let fullTitle = `${stat.providerID}/${stat.modelID}`
+            // 供应商名称截断：超过12字符则省略
+            const MAX_PROVIDER_LEN = 12
+            let providerDisplay = stat.providerID
+            if (providerDisplay.length > MAX_PROVIDER_LEN) {
+              providerDisplay = providerDisplay.slice(0, MAX_PROVIDER_LEN - 1) + "…"
+            }
+            let fullTitle = `${providerDisplay}/${stat.modelID}`
+            // 去除中间段：格式为 厂商/模型厂商/模型名称 时只留 provider/modelname
             if (fullTitle.length > 22) {
               const parts = fullTitle.split("/")
               if (parts.length >= 3) {

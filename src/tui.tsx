@@ -133,7 +133,8 @@ const tui: TuiPluginModule["tui"] = async (api) => {
               for (const msg of existing) {
                 if ((msg as any).role !== "assistant") continue
                 const tokens = (msg as any).tokens
-                if (!tokens) continue
+                // 与 message.updated 处理器保持一致：过滤 total=0 的失败请求
+                if (!tokens || (tokens.total ?? 0) === 0) continue
 
                 const id = (msg as any).id
                 const idx = next.findIndex(m => m.id === id)

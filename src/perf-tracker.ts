@@ -84,6 +84,12 @@ class PerfTracker {
     const cacheWrite = tokens?.cache?.write ?? 0
     const cost = info.cost ?? 0
 
+    // 过滤全零 token 的失败请求，不写入日志和统计，防止污染数据
+    if (inputTokens + outputTokens + cacheRead + cacheWrite === 0) {
+      this.firstPartTimes.delete(messageID)
+      return
+    }
+
     const firstPart = this.firstPartTimes.get(messageID) ?? null
 
     const latencyMs = completed - created

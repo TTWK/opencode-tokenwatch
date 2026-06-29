@@ -1,6 +1,6 @@
 {
   "name": "opencode-tokenwatch",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI",
   "type": "module",
   "main": "./dist/index.js",

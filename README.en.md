@@ -9,10 +9,13 @@ Real-time token usage, cache analytics & performance dashboard plugin for OpenCo
 ## Features
 
 - **Sidebar panel** — Session-level and per-model real-time stats (requests, tokens, cache, cost)
+- **Smart sorting** — Models sorted by most recent call time, current model always on top
+- **Provider name truncation** — Long provider names auto-truncated (12 chars) to prevent layout overflow
 - **Cache hit rate** — Inline color progress bars with trend indicators (↑/↓) and global weighted hit rate
 - **Performance metrics** — TTFT / TPS / End-to-end latency + P50/P95/P99 latency percentiles
 - **Token distribution** — 5-bucket role breakdown (system / user / toolCall / toolResult / output + other fallback)
 - **Error rate tracking** — Detects failed requests (empty token response) and computes real-time error rate
+- **Invalid data filtering** — Full-chain defense: filters zero-token entries from perf-tracker, sidebar, and HTML reports
 - **Cost display** — Per-model cost (requires provider billing data)
 - **`/usage` command** — HTML Report → JSON Export → Text Report → Settings
 - **HTML report** — Interactive ECharts dashboard: token distribution, performance percentiles, TPS horizontal ranking, error rate analysis — auto-opened in browser
