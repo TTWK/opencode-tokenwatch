@@ -348,8 +348,13 @@ function providerBorderColor(provider: string): string {
   return colors[provider] || "#2A2A35"
 }
 
+/** 渲染 Provider 卡片，按 token 总量降序，最多显示 10 个 */
 function renderProviderCards(data: CombinedReportData): string {
-  return data.providers.map(p => {
+  const sorted = [...data.providers].sort((a, b) => b.totalTokens - a.totalTokens)
+  const top = sorted.slice(0, 10)
+  const remaining = sorted.length - 10
+
+  const cards = top.map(p => {
     const modelCount = data.models.filter(m => m.provider === p.provider).length
     const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider)
     let ttftSum = 0, ttftReqs = 0;
@@ -380,18 +385,29 @@ function renderProviderCards(data: CombinedReportData): string {
       <div class="provider-stat"><span class="stat-label">Models</span><span>${modelCount}</span></div>
     </div>`
   }).join("\n")
+
+  const moreHint = remaining > 0
+    ? `<div class="provider-more">+ ${remaining} more provider${remaining > 1 ? 's' : ''} not shown</div>`
+    : ''
+
+  return cards + moreHint
 }
 
-function renderDataTable(data: CombinedReportData): string {
-  const rows = sortModelsByUsage(data.models).map(m => {
+/**
+ * 渲染 Model Analytics 区块：三个表格合并为 Tab 切换展示，各自带分页控件。
+ * Tab 1: Usage Breakdown  — Token/成本用量分解
+ * Tab 2: Latency Percentiles — TTFT/E2E 分位数
+ * Tab 3: Failed Requests  — 失败请求明细（无数据时不显示此 Tab）
+ */
+function renderModelAnalyticsSection(data: CombinedReportData): string {
+  // ─── Tab 1: Usage Breakdown ───────────────────────────────────────────────
+  const usageRows = sortModelsByUsage(data.models).map(m => {
     const hitRate = cacheHitRate(m.inputTokens, m.cacheRead)
-    const hitRatePct = fmtPercent(hitRate)
     const hitColor = hitRate >= 0.85 ? 'var(--cache)' : hitRate >= 0.70 ? 'var(--tps)' : 'var(--output)'
     const perf = data.perfSummary.find(p => p.model === `${m.provider}/${m.model}`)
     const ttft = perf?.avgTTFT != null ? perf.avgTTFT.toFixed(0) + 'ms' : '—'
     const p95ttft = perf?.p95TTFT != null ? perf.p95TTFT.toFixed(0) + 'ms' : '—'
     const tps = perf?.avgTPS != null ? perf.avgTPS.toFixed(1) : '—'
-
     return `<tr>
       <td>${m.model}</td>
       <td>${m.provider}</td>
@@ -400,7 +416,7 @@ function renderDataTable(data: CombinedReportData): string {
       <td>${fmtTokens(m.inputTokens)}</td>
       <td>${fmtTokens(m.outputTokens)}</td>
       <td>${fmtTokens(m.cacheRead)}</td>
-      <td style="color:${hitColor};font-weight:600">${hitRatePct}</td>
+      <td style="color:${hitColor};font-weight:600">${fmtPercent(hitRate)}</td>
       <td>${ttft}</td>
       <td style="color:var(--tps);font-size:0.85em">${p95ttft}</td>
       <td>${tps}</td>
@@ -408,40 +424,13 @@ function renderDataTable(data: CombinedReportData): string {
     </tr>`
   }).join("\n")
 
-  return `<table class="data-table">
-    <thead>
-      <tr>
-        <th>Model</th>
-        <th>Provider</th>
-        <th>Req</th>
-        <th>Total</th>
-        <th>Input</th>
-        <th>Output</th>
-        <th>Cache</th>
-        <th>Hit Rate</th>
-        <th>Avg TTFT</th>
-        <th>P95 TTFT</th>
-        <th>TPS</th>
-        <th>Cost</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>`
-}
-
-/** 渲染 P50/P95/P99 延迟分位数表格 */
-function renderPerfPercentileTable(data: CombinedReportData): string {
-  // 过滤掉无效记录：无请求或 token 全为 0 的模型
+  // ─── Tab 2: Latency Percentiles ───────────────────────────────────────────
   const validPerf = data.perfSummary.filter(p =>
     p.requestCount > 0 &&
     (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
   )
-  if (validPerf.length === 0) return ''
-
-  const fmtMs = (v: number | null | undefined) =>
-    v != null ? v.toFixed(0) + 'ms' : '—'
-
-  const rows = validPerf.map(p => {
+  const fmtMs = (v: number | null | undefined) => v != null ? v.toFixed(0) + 'ms' : '—'
+  const perfRows = validPerf.map(p => {
     const hitColor = p.cacheHitRate != null && p.cacheHitRate >= 85 ? 'var(--cache)'
       : p.cacheHitRate != null && p.cacheHitRate >= 70 ? 'var(--tps)' : 'var(--output)'
     return `<tr>
@@ -459,74 +448,104 @@ function renderPerfPercentileTable(data: CombinedReportData): string {
     </tr>`
   }).join("\n")
 
-  return `
-  <section class="section">
-    <h2 class="section-title">Performance Latency Percentiles</h2>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Model</th>
-          <th>Req</th>
-          <th>Avg TTFT</th>
-          <th>P50 TTFT</th>
-          <th>P95 TTFT</th>
-          <th>P99 TTFT</th>
-          <th>Avg E2E</th>
-          <th>P50 E2E</th>
-          <th>P95 E2E</th>
-          <th>P99 E2E</th>
-          <th>Cache Hit</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </section>`
-}
-
-/** 渲染失败请求统计区域 */
-function renderErrorStatsSection(data: CombinedReportData): string {
+  // ─── Tab 3: Failed Requests ───────────────────────────────────────────────
   const errors = (data as any).errors as {
     successCount: number; failedCount: number; errorRate: number
     byModel: Array<{ provider: string; model: string; failed: number; total: number }>
   } | undefined
+  const hasErrors = !!(errors && errors.failedCount > 0)
 
-  if (!errors || errors.failedCount === 0) return ''
+  let errorTabBtn = ''
+  let errorTabContent = ''
+  if (hasErrors) {
+    const errorRatePct = (errors!.errorRate * 100).toFixed(2) + '%'
+    const rateColor = errors!.errorRate >= 0.05 ? 'var(--output)' : 'var(--tps)'
+    const cellColor = errors!.errorRate >= 0.05 ? 'var(--output)' : 'var(--tps)'
+    const errorRows = errors!.byModel
+      .filter(m => m.failed > 0)
+      .map(m => {
+        const modelRate = m.total > 0 ? (m.failed / m.total * 100).toFixed(1) + '%' : '—'
+        return `<tr>
+          <td>${m.provider}</td>
+          <td>${m.model}</td>
+          <td>${m.total}</td>
+          <td style="color:var(--output)">${m.failed}</td>
+          <td style="color:var(--tps)">${m.total - m.failed}</td>
+          <td style="color:${cellColor}">${modelRate}</td>
+        </tr>`
+      }).join('\n')
 
-  const errorRatePct = (errors.errorRate * 100).toFixed(2) + '%'
-  const rateColor = errors.errorRate >= 0.05 ? 'var(--output)'
-    : errors.errorRate > 0 ? 'var(--tps)' : 'var(--cache)'
+    errorTabBtn = `
+      <button class="tab-btn" data-mtab="errors" onclick="switchModelTab('errors')">
+        Failed Requests <span style="color:var(--output);margin-left:4px;font-size:0.85em">(${errors!.failedCount})</span>
+      </button>`
 
-  const rows = errors.byModel
-    .filter(m => m.failed > 0)
-    .map(m => {
-      const modelRate = m.total > 0 ? (m.failed / m.total * 100).toFixed(1) + '%' : '—'
-      return `<tr>
-        <td>${m.provider}</td>
-        <td>${m.model}</td>
-        <td>${m.total}</td>
-        <td style="color:var(--output)">${m.failed}</td>
-        <td style="color:var(--tps)">${m.total - m.failed}</td>
-        <td style="color:${errors.errorRate >= 0.05 ? 'var(--output)' : 'var(--tps)'}">${modelRate}</td>
-      </tr>`
-    }).join('\n')
-
-  return `
-  <section class="section">
-    <h2 class="section-title">Failed Requests
-      <span style="margin-left:12px;font-size:0.85em;color:${rateColor}">
-        overall error rate: ${errorRatePct} (${errors.failedCount} failed / ${errors.successCount + errors.failedCount} total)
-      </span>
-    </h2>
-    <table class="data-table">
-      <thead>
-        <tr>
+    errorTabContent = `
+    <div id="model-tab-errors" class="tab-content">
+      <p style="font-size:12px;color:${rateColor};padding:8px 0 6px">
+        Overall error rate: <strong>${errorRatePct}</strong> &mdash;
+        ${errors!.failedCount} failed / ${errors!.successCount + errors!.failedCount} total
+      </p>
+      <table id="errors-table" class="data-table">
+        <thead><tr>
           <th>Provider</th><th>Model</th><th>Total</th>
           <th>Failed</th><th>Success</th><th>Error Rate</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </section>`
+        </tr></thead>
+        <tbody>${errorRows}</tbody>
+      </table>
+      <div class="pagination-ctrl" id="errors-table-ctrl">
+        <button class="page-btn" id="errors-table-prev">← Prev</button>
+        <span class="page-info" id="errors-table-info"></span>
+        <button class="page-btn" id="errors-table-next">Next →</button>
+      </div>
+    </div>`
+  }
+
+  return `
+  <div class="section">
+    <div class="section-title">Model Analytics</div>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-mtab="usage" onclick="switchModelTab('usage')">Usage Breakdown</button>
+      <button class="tab-btn" data-mtab="perf" onclick="switchModelTab('perf')">Latency Percentiles</button>
+      ${errorTabBtn}
+    </div>
+
+    <div id="model-tab-usage" class="tab-content active">
+      <table id="usage-table" class="data-table">
+        <thead><tr>
+          <th>Model</th><th>Provider</th><th>Req</th><th>Total</th>
+          <th>Input</th><th>Output</th><th>Cache</th><th>Hit Rate</th>
+          <th>Avg TTFT</th><th>P95 TTFT</th><th>TPS</th><th>Cost</th>
+        </tr></thead>
+        <tbody>${usageRows}</tbody>
+      </table>
+      <div class="pagination-ctrl" id="usage-table-ctrl">
+        <button class="page-btn" id="usage-table-prev">← Prev</button>
+        <span class="page-info" id="usage-table-info"></span>
+        <button class="page-btn" id="usage-table-next">Next →</button>
+      </div>
+    </div>
+
+    <div id="model-tab-perf" class="tab-content">
+      ${validPerf.length > 0 ? `
+      <table id="perf-table" class="data-table">
+        <thead><tr>
+          <th>Model</th><th>Req</th>
+          <th>Avg TTFT</th><th>P50 TTFT</th><th>P95 TTFT</th><th>P99 TTFT</th>
+          <th>Avg E2E</th><th>P50 E2E</th><th>P95 E2E</th><th>P99 E2E</th>
+          <th>Cache Hit</th>
+        </tr></thead>
+        <tbody>${perfRows}</tbody>
+      </table>
+      <div class="pagination-ctrl" id="perf-table-ctrl">
+        <button class="page-btn" id="perf-table-prev">← Prev</button>
+        <span class="page-info" id="perf-table-info"></span>
+        <button class="page-btn" id="perf-table-next">Next →</button>
+      </div>` : '<div class="empty-state">No performance data available for this period.</div>'}
+    </div>
+
+    ${errorTabContent}
+  </div>`
 }
 
 function renderDailyTrendInit(data: CombinedReportData): string {
@@ -683,9 +702,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   const modelChartJs = modelChartVisible ? renderModelChartInit(data) : ""
   const scatterChartJs = renderScatterChartInit(data)
   const providerStr = renderProviderCards(data)
-  const tableStr = renderDataTable(data)
-  const perfPercentileStr = renderPerfPercentileTable(data)
-  const errorStatsStr = renderErrorStatsSection(data)
+  const modelAnalyticsStr = renderModelAnalyticsSection(data)
   const dailyChartJs = renderDailyTrendInit(data)
   const heatmapJs = renderHeatmapInit(data)
   const hasPerf = data.perfSummary.some(p =>
@@ -773,6 +790,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   .provider-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--input); }
   .provider-stat { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
   .provider-stat .stat-label { color: var(--text-dim); }
+  .provider-more { color: var(--text-dim); font-size: 11px; padding: 10px 4px 0; grid-column: 1 / -1; }
 
   .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .data-table th {
@@ -789,6 +807,22 @@ export function generateUsageHtml(data: CombinedReportData): string {
     text-align: left; color: var(--text); font-family: 'Inter', sans-serif;
   }
   .data-table tbody tr:hover { background: rgba(42,42,53,0.4); }
+
+  .pagination-ctrl {
+    display: none; align-items: center; gap: 14px; justify-content: center;
+    padding: 14px 0 4px;
+  }
+  .page-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 16px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; font-family: 'Inter', sans-serif; transition: border-color 0.15s, color 0.15s;
+  }
+  .page-btn:hover:not(:disabled) { border-color: var(--input); color: var(--input); }
+  .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .page-info {
+    color: var(--text-dim); font-size: 12px;
+    font-family: 'JetBrains Mono', monospace; min-width: 110px; text-align: center;
+  }
 
   .empty-state {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
@@ -822,7 +856,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
 
   <div class="section">
     <div class="section-title">Model Comparison Matrix</div>
-    ${modelChartVisible ? '<div class="chart-box" id="model-chart"></div>' : '<div class="empty-state">No models with >=1M tokens in this period.</div>'}
+    ${modelChartVisible ? '<div class="chart-box" id="model-chart"></div>' : '<div class="empty-state">No models with &ge;1M tokens in this period.</div>'}
   </div>
 
   <div class="section">
@@ -830,14 +864,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
     <div class="provider-row">${providerStr}</div>
   </div>
 
-  <div class="section">
-    <div class="section-title">Detailed Data Grid</div>
-    ${tableStr}
-  </div>
-
-  ${perfPercentileStr}
-
-  ${errorStatsStr}
+  ${modelAnalyticsStr}
 
   <div class="section">
     <div class="section-title">Efficiency vs Cost</div>
@@ -858,9 +885,9 @@ export function generateUsageHtml(data: CombinedReportData): string {
     </div>
   </div>
 
-    <div class="footer">
-      Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="javascript:void(0)" onclick="downloadJSON()" style="color:var(--input);text-decoration:none">JSON</a> <span style="color:var(--text-dim)">(saves to browser download folder)</span>
-    </div>
+  <div class="footer">
+    Generated by TokenWatch &middot; Data: SQLite + JSONL &middot; Export: <a href="javascript:void(0)" onclick="downloadJSON()" style="color:var(--input);text-decoration:none">JSON</a> <span style="color:var(--text-dim)">(saves to browser download folder)</span>
+  </div>
 </div>
 
 <script id="report-data" type="application/json">${jsonData}</script>
@@ -874,9 +901,10 @@ var fmt = function(v) {
   return String(v);
 };
 
+// Usage Timeline tab switcher
 window.switchTab = function(name) {
   document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
-  document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(function(el) { el.classList.remove('active'); });
   document.getElementById('tab-' + name).classList.add('active');
   document.querySelector('[data-tab="' + name + '"]').classList.add('active');
   setTimeout(function() {
@@ -884,6 +912,50 @@ window.switchTab = function(name) {
     if (name === 'heatmap' && window.heatmapChart) window.heatmapChart.resize();
   }, 50);
 };
+
+// Model Analytics tab switcher
+window.switchModelTab = function(name) {
+  document.querySelectorAll('[data-mtab]').forEach(function(el) { el.classList.remove('active'); });
+  ['model-tab-usage', 'model-tab-perf', 'model-tab-errors'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  var activeTab = document.getElementById('model-tab-' + name);
+  if (activeTab) activeTab.classList.add('active');
+  var activeBtn = document.querySelector('[data-mtab="' + name + '"]');
+  if (activeBtn) activeBtn.classList.add('active');
+};
+
+// Generic paginator: hide/show tbody rows, show prev/next controls
+function initPaginator(tableId, pageSize) {
+  var tbody = document.querySelector('#' + tableId + ' tbody');
+  if (!tbody) return;
+  var rows = Array.from(tbody.querySelectorAll('tr'));
+  if (rows.length <= pageSize) return; // 行数不超过一页时无需分页
+  var totalPages = Math.ceil(rows.length / pageSize);
+  var cur = 1;
+
+  function render() {
+    rows.forEach(function(r, i) {
+      r.style.display = (i >= (cur - 1) * pageSize && i < cur * pageSize) ? '' : 'none';
+    });
+    var info = document.getElementById(tableId + '-info');
+    if (info) info.textContent = 'Page ' + cur + ' / ' + totalPages + ' (' + rows.length + ' rows)';
+    var prevEl = document.getElementById(tableId + '-prev');
+    var nextEl = document.getElementById(tableId + '-next');
+    if (prevEl) prevEl.disabled = cur === 1;
+    if (nextEl) nextEl.disabled = cur === totalPages;
+  }
+
+  var prevEl = document.getElementById(tableId + '-prev');
+  var nextEl = document.getElementById(tableId + '-next');
+  if (prevEl) prevEl.addEventListener('click', function() { if (cur > 1) { cur--; render(); } });
+  if (nextEl) nextEl.addEventListener('click', function() { if (cur < totalPages) { cur++; render(); } });
+
+  var ctrl = document.getElementById(tableId + '-ctrl');
+  if (ctrl) ctrl.style.display = 'flex';
+  render();
+}
 
 ${modelChartJs}
 ${scatterChartJs}
@@ -908,6 +980,9 @@ document.addEventListener('DOMContentLoaded', function() {
   ${hasPerf ? 'initScatterChart();' : ''}
   initDailyChart();
   initHeatmapChart();
+  initPaginator('usage-table', 10);
+  initPaginator('perf-table', 10);
+  initPaginator('errors-table', 10);
 });
 
 window.addEventListener('resize', function() {

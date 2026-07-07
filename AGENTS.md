@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-06-29（v0.3.2）
+> 最后更新：2026-07-07（v0.4.0）
 
 ---
 
@@ -10,7 +10,7 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.3.2`
+- **版本**：`0.4.0`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
 - **构建工具**：`tsc`（TypeScript 编译器，无打包器）
@@ -280,4 +280,4 @@ npm run release:check
 
 ---
 
-*本文档于 2026-06-29 更新，版本 v0.3.2。*
+*本文档于 2026-07-07 更新，版本 v0.4.0。*
