@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-07-07（v0.4.0）
+> 最后更新：2026-07-15（v0.5.0）
 
 ---
 
@@ -10,10 +10,10 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.4.0`
+- **版本**：`0.5.0`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
-- **构建工具**：`tsc`（TypeScript 编译器，无打包器）
+- **构建工具**：`tsc`（类型声明生成）+ `esbuild`（JS 打包，含 SolidJS JSX 预编译）
 - **协议**：MIT
 
 ---
@@ -23,7 +23,7 @@
 ```
 opencode-tokenwatch/
 ├── src/                        # 所有源码
-│   ├── index.ts                # 插件入口（目前是空壳，tui 在 tui.tsx 导出）
+│   ├── server.ts               # Server 插件入口（空壳，导出 ./server）
 │   ├── tui.tsx                 # TUI 插件主模块，事件监听 & Slot 注册
 │   ├── sidebar.tsx             # TokenWatchPanel 组件（SolidJS），侧边栏 UI
 │   ├── perf-tracker.ts         # 性能指标追踪（TTFT / TPS / 延迟）+ JSONL 日志
@@ -38,6 +38,7 @@ opencode-tokenwatch/
 │   └── PROJECT-REVIEW.md       # 历史审查文档
 ├── assets/                     # 静态资产
 ├── scripts/                    # 构建辅助脚本（publish-check.mjs）
+├── build.tui.mjs               # esbuild 打包脚本（TSX -> JS，含 SolidJS JSX 预编译）
 ├── package.json
 ├── tsconfig.json
 ├── AGENTS.md                   # 本文档
@@ -214,10 +215,27 @@ const tokenTotal = (msg) =>
 
 ### TypeScript / 构建
 
-- **模块系统**：纯 ESM，所有导入必须带 `.js`/`.jsx` 扩展名
-- **编译**：`npm run build`（= `tsc`）。产物在 `dist/`，**不提交到 git**
+- **模块系统**：纯 ESM，所有导入必须带 `.js` 扩展名（`.tsx` 源文件的导入也用 `.js`）
+- **编译流程**：`npm run build`（= `tsc && node build.tui.mjs`）
+  - `tsc`：仅生成 `.d.ts` 类型声明文件（`emitDeclarationOnly: true`）
+  - `build.tui.mjs`：esbuild 打包，将 `src/tui.tsx` -> `dist/tui.js`（含 SolidJS JSX 预编译），`src/server.ts` -> `dist/server.js`
+- **JSX 预编译**：使用 `esbuild-plugin-solid`，配置 `moduleName: "@opentui/solid"` + `generate: "universal"`，将 JSX 编译为 `createComponent()` 等调用。opencode 1.17.14+ 不再进行运行时 JSX 转换，要求插件在构建时预编译
+- **产物在 `dist/`，不提交到 git**
 - **JSX**：SolidJS 风格，不是 React。`createSignal`/`createMemo`/`createEffect` 等
 - **类型安全**：大量使用 `any` 访问 OpenCode API 事件（API 类型不完整），修改时需谨慎
+
+### Package Exports 结构
+
+```json
+{
+  ".":       { "import": "./dist/server.js" },        // Server 插件入口
+  "./tui":   { "import": "./dist/tui.js", "config": { "enabled": true } },  // TUI 插件入口
+  "./server":{ "import": "./dist/server.js" }         // Server 插件（显式路径）
+}
+```
+
+- `./tui` 导出必须包含 `"config": { "enabled": true }`，opencode 1.17.14+ 据此启用 TUI 插件
+- `./tui` 导出的文件必须是预编译的 `.js`（非 `.jsx`）
 
 ### OpenCode 插件 API
 
@@ -275,9 +293,11 @@ npm run release:check
 | `@opentui/core` | TUI 颜色类型（RGBA） |
 | `@opentui/solid` | SolidJS TUI 渲染器 |
 | `solid-js` | 响应式 UI 框架（通过 @opentui/solid） |
+| `esbuild` | JS 打包器，将 TSX 预编译为纯 JS（v0.5.0 新增） |
+| `esbuild-plugin-solid` | esbuild 插件，SolidJS JSX -> createComponent 转换（v0.5.0 新增） |
 
 > 以上均为 devDependencies，运行时由 OpenCode CLI 宿主环境提供。
 
 ---
 
-*本文档于 2026-07-07 更新，版本 v0.4.0。*
+*本文档于 2026-07-15 更新，版本 v0.5.0。*

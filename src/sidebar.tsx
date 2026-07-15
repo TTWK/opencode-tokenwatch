@@ -4,7 +4,7 @@ import { RGBA } from "@opentui/core"
 import { formatTokens, formatCost, formatDuration } from "./formatter.js"
 import { t as baseT, setLanguage } from "./i18n.js"
 import type { PerfTracker } from "./perf-tracker.js"
-import type { TokenMessage } from "./tui.jsx"
+import type { TokenMessage } from "./tui.js"
 
 export interface SidebarConfig {
   sidebar: {

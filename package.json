@@ -1,18 +1,25 @@
 {
   "name": "opencode-tokenwatch",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
-      "import": "./dist/tui.jsx"
+      "import": "./dist/tui.js",
+      "config": {
+        "enabled": true
+      }
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./package.json": "./package.json"
   },
@@ -24,7 +31,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node build.tui.mjs",
     "release:check": "node ./scripts/publish-check.mjs",
     "prepublishOnly": "npm run build"
   },
@@ -55,6 +62,8 @@
     "@opentui/keymap": "^0.2.9",
     "@opentui/solid": "^0.2.9",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "esbuild-plugin-solid": "^0.5.0",
     "typescript": "^5.7.0"
   },
   "publishConfig": {
