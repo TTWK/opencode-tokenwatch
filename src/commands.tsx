@@ -182,13 +182,54 @@ async function buildCombinedData(api: TuiPluginApi, filters: UsageFilters = {}):
   }
 }
 
-async function showHtmlReport(api: TuiPluginApi, filters: UsageFilters = {}): Promise<void> {
+function getRangeSlug(filters: UsageFilters, presetTag?: string): string {
+  if (presetTag) return presetTag
+  if (!filters.startDate && !filters.endDate) return "all"
+  if (filters.startDate && filters.endDate) {
+    if (filters.startDate === filters.endDate) {
+      const today = new Date().toISOString().slice(0, 10)
+      if (filters.startDate === today) return "today"
+      return filters.startDate
+    }
+    return `${filters.startDate.replace(/-/g, "")}_${filters.endDate.replace(/-/g, "")}`
+  }
+  if (filters.startDate) return `from_${filters.startDate.replace(/-/g, "")}`
+  if (filters.endDate) return `until_${filters.endDate.replace(/-/g, "")}`
+  return "custom"
+}
+
+function generateUniqueReportPath(dir: string, rangeSlug: string): string {
+  const dateStr = new Date().toISOString().slice(0, 10)
+  const baseName = `tokenwatch-${rangeSlug}-${dateStr}`
+  let targetPath = join(dir, `${baseName}.html`)
+
+  if (!existsSync(targetPath)) {
+    return targetPath
+  }
+
+  // 同名文件已存在时，追加时分秒 (HHMMSS) 后缀以示区分
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const timeSuffix = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  targetPath = join(dir, `${baseName}_${timeSuffix}.html`)
+
+  // 极罕见场景（同一秒内连续生成）：使用递增数字后缀 _1, _2 ...
+  let counter = 1
+  while (existsSync(targetPath)) {
+    targetPath = join(dir, `${baseName}_${timeSuffix}_${counter}.html`)
+    counter++
+  }
+
+  return targetPath
+}
+
+async function showHtmlReport(api: TuiPluginApi, filters: UsageFilters = {}, presetTag?: string): Promise<void> {
   try {
     const data = await buildCombinedData(api, filters)
     const html = generateUsageHtml(data)
     const dir = ensureReportDir()
-    const dateStr = new Date().toISOString().slice(0, 10)
-    const filePath = join(dir, `tokenwatch-${dateStr}.html`)
+    const rangeSlug = getRangeSlug(filters, presetTag)
+    const filePath = generateUniqueReportPath(dir, rangeSlug)
     writeFileSync(filePath, html, "utf-8")
 
     api.ui.toast?.({ message: `Report: ${filePath}`, variant: "info" })
@@ -213,23 +254,23 @@ function showHtmlReportRangeMenu(api: TuiPluginApi, dialog: TuiDialogStack): voi
             const d = new Date()
             const pad = (n: number) => String(n).padStart(2, "0")
             const s = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-            showHtmlReport(api, { startDate: s, endDate: s })
+            showHtmlReport(api, { startDate: s, endDate: s }, "today")
           },
         },
         {
           title: t("menu7d"),
           value: "7d",
-          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("7d")) },
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("7d"), "7d") },
         },
         {
           title: t("menu30d"),
           value: "30d",
-          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("30d")) },
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("30d"), "30d") },
         },
         {
           title: t("menuAll"),
           value: "all",
-          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("all")) },
+          onSelect: () => { dialog.clear(); showHtmlReport(api, getPresetRange("all"), "all") },
         },
       ]}
       flat={true}
