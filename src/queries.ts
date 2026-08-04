@@ -1,4 +1,5 @@
 import { exec } from "node:child_process"
+import { dirname, join } from "node:path"
 import type {
   DailyBreakdownItem,
   ErrorStats,
@@ -10,9 +11,38 @@ import type {
   UsageReport,
 } from "./formatter.js"
 
+/**
+ * 构建包含 opencode 可执行文件路径的 PATH 环境变量。
+ *
+ * 在 Windows 上（nvm 安装场景），opencode.exe 位于 node.exe 同级的
+ * node_modules/opencode-ai/node_modules/opencode-windows-x64/bin/ 目录，
+ * 该目录不会被子进程自动继承。通过 process.execPath 推算出 node.exe 所在
+ * 目录，再拼接出 opencode bin 目录追加到 PATH，使子进程可以找到 opencode。
+ * Linux/macOS 上 opencode 本来就在 PATH 里，追加只是无害的冗余。
+ */
+function buildEnvWithOpencodePath(): NodeJS.ProcessEnv {
+  const nodeDir = dirname(process.execPath)
+  const candidateDirs = [
+    // nvm on Windows: opencode-ai 包的 bin 目录
+    join(nodeDir, "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin"),
+    // npm global install: opencode 直接在 node_modules/.bin
+    join(nodeDir, "node_modules", ".bin"),
+    // 也加入 node.exe 所在目录本身（nvm 可能在此放 shim）
+    nodeDir,
+  ]
+  const pathSep = process.platform === "win32" ? ";" : ":"
+  const extraPath = candidateDirs.join(pathSep)
+  return {
+    ...process.env,
+    PATH: `${extraPath}${pathSep}${process.env.PATH ?? ""}`,
+  }
+}
+
+const OPENCODE_ENV = buildEnvWithOpencodePath()
+
 function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    exec(cmd, { windowsHide: true, timeout: 30000 }, (error, stdout, stderr) => {
+    exec(cmd, { windowsHide: true, timeout: 30000, env: OPENCODE_ENV }, (error, stdout, stderr) => {
       if (error) reject(Object.assign(error, { stderr }))
       else resolve({ stdout, stderr })
     })

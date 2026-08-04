@@ -717,9 +717,43 @@ export function generateUsageHtml(data: CombinedReportData): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TokenWatch Usage Report</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  /* 使用系统字体 stack，无需加载外部字体 */
+  :root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  }
+</style>
+<!-- ECharts: 多 CDN fallback (staticfile -> bootcdn -> cdnjs -> unpkg -> jsDelivr) -->
+<script>
+(function() {
+  var cdns = [
+    'https://cdn.staticfile.org/echarts/5.5.0/echarts.min.js',
+    'https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js',
+    'https://unpkg.com/echarts@5.5.0/dist/echarts.min.js',
+    'https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js'
+  ];
+  var idx = 0;
+  function loadNext() {
+    if (idx >= cdns.length) {
+      var err = document.getElementById('echarts-error');
+      if (err) err.style.display = 'block';
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = cdns[idx++];
+    s.onload = function() {
+      if (typeof window.tryInitCharts === 'function') {
+        window.tryInitCharts();
+      }
+    };
+    s.onerror = loadNext;
+    document.head.appendChild(s);
+  }
+  loadNext();
+})();
+</script>
 <style>
   :root {
     --bg: #0C0C0E;
@@ -737,7 +771,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Inter', -apple-system, sans-serif;
+    font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
     min-height: 100vh;
@@ -749,7 +783,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   }
   .header h1 { font-size: 22px; font-weight: 600; color: var(--text); }
   .header h1 span { color: var(--input); }
-  .header .meta { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+  .header .meta { font-size: 12px; color: var(--text-dim); font-family: var(--font-mono); }
 
   .kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
   .kpi-card {
@@ -758,7 +792,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   }
   .kpi-card.kpi-glow { box-shadow: 0 0 20px rgba(0,245,147,0.15); border-color: var(--cache); }
   .kpi-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .kpi-value { font-size: 26px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text); }
+  .kpi-value { font-size: 26px; font-weight: 700; font-family: var(--font-mono); color: var(--text); }
 
   .section { margin-bottom: 28px; }
   .section-title {
@@ -773,7 +807,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
   .tab-bar { display: flex; gap: 4px; margin-bottom: 12px; }
   .tab-btn {
     background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 6px 18px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 13px; font-family: 'Inter', sans-serif;
+    padding: 6px 18px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 13px; font-family: var(--font-sans);
   }
   .tab-btn:hover { border-color: var(--input); color: var(--text); }
   .tab-btn.active {
@@ -801,10 +835,10 @@ export function generateUsageHtml(data: CombinedReportData): string {
   .data-table th:first-child { text-align: left; }
   .data-table td {
     padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
   }
   .data-table td:first-child {
-    text-align: left; color: var(--text); font-family: 'Inter', sans-serif;
+    text-align: left; color: var(--text); font-family: var(--font-sans);
   }
   .data-table tbody tr:hover { background: rgba(42,42,53,0.4); }
 
@@ -815,13 +849,13 @@ export function generateUsageHtml(data: CombinedReportData): string {
   .page-btn {
     background: var(--card); border: 1px solid var(--border); color: var(--text);
     padding: 5px 16px; border-radius: 4px; cursor: pointer;
-    font-size: 12px; font-family: 'Inter', sans-serif; transition: border-color 0.15s, color 0.15s;
+    font-size: 12px; font-family: var(--font-sans); transition: border-color 0.15s, color 0.15s;
   }
   .page-btn:hover:not(:disabled) { border-color: var(--input); color: var(--input); }
   .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .page-info {
     color: var(--text-dim); font-size: 12px;
-    font-family: 'JetBrains Mono', monospace; min-width: 110px; text-align: center;
+    font-family: var(--font-mono); min-width: 110px; text-align: center;
   }
 
   .empty-state {
@@ -846,6 +880,9 @@ export function generateUsageHtml(data: CombinedReportData): string {
 </style>
 </head>
 <body>
+<div id="echarts-error" style="display:none;position:fixed;top:0;left:0;right:0;padding:14px 24px;background:#7f1d1d;color:#fca5a5;font-size:13px;z-index:9999;text-align:center">
+  ⚠️ 图表库加载失败（ECharts CDN 均无法访问）。请检查网络连接后刷新页面，或在离线环境下将 ECharts JS 文件下载到本地后手动引入。
+</div>
 <div class="container">
   <div class="header">
     <h1><span>TokenWatch</span> Usage Report</h1>
@@ -975,14 +1012,20 @@ window.downloadJSON = function() {
   setTimeout(function() { URL.revokeObjectURL(a.href); }, 100);
 };
 
-document.addEventListener('DOMContentLoaded', function() {
+window.tryInitCharts = function() {
+  if (typeof echarts === 'undefined' || window.__chartsInitialized) return;
+  window.__chartsInitialized = true;
   ${modelChartVisible ? 'initModelChart();' : ''}
   ${hasPerf ? 'initScatterChart();' : ''}
   initDailyChart();
   initHeatmapChart();
+};
+
+document.addEventListener('DOMContentLoaded', function() {
   initPaginator('usage-table', 10);
   initPaginator('perf-table', 10);
   initPaginator('errors-table', 10);
+  window.tryInitCharts();
 });
 
 window.addEventListener('resize', function() {
