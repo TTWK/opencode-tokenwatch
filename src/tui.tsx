@@ -1,8 +1,9 @@
+/** @jsxImportSource @opentui/solid */
 import { createSignal, createEffect, onCleanup } from "solid-js"
 import type { TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { registerCommands } from "./commands.jsx"
+import { registerCommands } from "./commands.js"
 import { createPerfTracker } from "./perf-tracker.js"
-import { TokenWatchPanel } from "./sidebar.jsx"
+import { TokenWatchPanel } from "./sidebar.js"
 
 export interface TokenMessage {
   id: string
