@@ -7,3 +7,4 @@ tokenwatch-*.csv
 tokenwatch-*.html
 tokenwatch-*.md
 .worktrees/
+.workbuddy/

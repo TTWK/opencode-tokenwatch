@@ -11,47 +11,20 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import type { LogEntry, ModelPerfStats } from "./formatter.js"
+import type { LogEntry, ModelPerfStats } from "./format.js"
+import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
 
 const STATS_PATH = join(homedir(), ".opencode", "tokenwatch-stats.json")
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
 const RESERVOIR_SIZE = 500   // 每个指标最多保留的原始样本数
 const CURRENT_VERSION = 1
 
-/** 持久化存储的单模型统计（含原始样本用于分位数计算） */
-interface PersistedModelStats {
-  model: string
-  providerID: string
-  requestCount: number
-  ttftCount: number
-  tpsCount: number
-  latencyCount: number
-  totalInput: number
-  totalOutput: number
-  totalCacheRead: number
-  totalCacheWrite: number
-  totalCost: number
-  avgTTFT: number | null
-  maxTTFT: number | null
-  minTTFT: number | null
-  avgTPS: number | null
-  maxTPS: number | null
-  minTPS: number | null
-  avgLatency: number | null
-  maxLatency: number | null
-  minLatency: number | null
-  /** TTFT 原始样本（Reservoir Sampling，最多 RESERVOIR_SIZE 条） */
-  ttftReservoir: number[]
-  /** 端到端延迟原始样本 */
-  latencyReservoir: number[]
-}
-
 interface StatsFile {
   version: number
   updatedAt: string
   /** 是否已完成从 JSONL 日志的一次性迁移 */
   migratedFromLogs: boolean
-  models: Record<string, PersistedModelStats>
+  models: Record<string, ModelAccumulator>
 }
 
 // ─────────────────────────────────────────────
@@ -75,95 +48,6 @@ function saveStatsFile(file: StatsFile): void {
     file.updatedAt = new Date().toISOString()
     writeFileSync(STATS_PATH, JSON.stringify(file), "utf-8")
   } catch { /* 写入失败不影响主流程 */ }
-}
-
-// ─────────────────────────────────────────────
-// Reservoir Sampling（有界样本更新）
-// ─────────────────────────────────────────────
-
-/**
- * Reservoir Sampling 算法：保证内存有界的同时，给每个观测值相同的入选概率，
- * 使分位数估算在统计意义上无偏。
- *
- * @param reservoir 当前样本数组（会被原地返回新引用）
- * @param value 新观测值
- * @param totalCount 加入此值后的总观测数
- */
-function reservoirAdd(reservoir: number[], value: number, totalCount: number): number[] {
-  if (reservoir.length < RESERVOIR_SIZE) {
-    return [...reservoir, value]
-  }
-  // 以 RESERVOIR_SIZE/totalCount 的概率替换随机位置
-  const j = Math.floor(Math.random() * totalCount)
-  if (j < RESERVOIR_SIZE) {
-    const next = [...reservoir]
-    next[j] = value
-    return next
-  }
-  return reservoir
-}
-
-// ─────────────────────────────────────────────
-// 核心增量更新逻辑（可复用于单条 & 批量迁移）
-// ─────────────────────────────────────────────
-
-function applyEntryToModels(models: Record<string, PersistedModelStats>, entry: LogEntry): void {
-  const key = entry.model
-  let s = models[key]
-  if (!s) {
-    s = {
-      model: entry.model,
-      providerID: entry.providerID,
-      requestCount: 0,
-      ttftCount: 0,
-      tpsCount: 0,
-      latencyCount: 0,
-      totalInput: 0,
-      totalOutput: 0,
-      totalCacheRead: 0,
-      totalCacheWrite: 0,
-      totalCost: 0,
-      avgTTFT: null, maxTTFT: null, minTTFT: null,
-      avgTPS: null, maxTPS: null, minTPS: null,
-      avgLatency: null, maxLatency: null, minLatency: null,
-      ttftReservoir: [],
-      latencyReservoir: [],
-    }
-    models[key] = s
-  }
-
-  s.requestCount++
-  s.totalInput += entry.inputTokens
-  s.totalOutput += entry.outputTokens
-  s.totalCacheRead += entry.cacheReadTokens
-  s.totalCacheWrite += entry.cacheWriteTokens
-  s.totalCost += entry.cost
-
-  if (entry.ttft_ms != null) {
-    s.ttftCount++
-    const c = s.ttftCount
-    s.avgTTFT = s.avgTTFT != null ? s.avgTTFT + (entry.ttft_ms - s.avgTTFT) / c : entry.ttft_ms
-    s.maxTTFT = s.maxTTFT != null ? Math.max(s.maxTTFT, entry.ttft_ms) : entry.ttft_ms
-    s.minTTFT = s.minTTFT != null ? Math.min(s.minTTFT, entry.ttft_ms) : entry.ttft_ms
-    s.ttftReservoir = reservoirAdd(s.ttftReservoir, entry.ttft_ms, s.ttftCount)
-  }
-
-  if (entry.tps != null) {
-    s.tpsCount++
-    const c = s.tpsCount
-    s.avgTPS = s.avgTPS != null ? s.avgTPS + (entry.tps - s.avgTPS) / c : entry.tps
-    s.maxTPS = s.maxTPS != null ? Math.max(s.maxTPS, entry.tps) : entry.tps
-    s.minTPS = s.minTPS != null ? Math.min(s.minTPS, entry.tps) : entry.tps
-  }
-
-  if (entry.latency_ms != null) {
-    s.latencyCount++
-    const c = s.latencyCount
-    s.avgLatency = s.avgLatency != null ? s.avgLatency + (entry.latency_ms - s.avgLatency) / c : entry.latency_ms
-    s.maxLatency = s.maxLatency != null ? Math.max(s.maxLatency, entry.latency_ms) : entry.latency_ms
-    s.minLatency = s.minLatency != null ? Math.min(s.minLatency, entry.latency_ms) : entry.latency_ms
-    s.latencyReservoir = reservoirAdd(s.latencyReservoir, entry.latency_ms, s.latencyCount)
-  }
 }
 
 // ─────────────────────────────────────────────
@@ -192,7 +76,12 @@ function migrateFromLogsIfNeeded(file: StatsFile): boolean {
       try {
         const entry = JSON.parse(line) as LogEntry
         if (entry.model && entry.ts) {
-          applyEntryToModels(file.models, entry)
+          let acc = file.models[entry.model]
+          if (!acc) {
+            acc = createAccumulator(entry.model, entry.providerID)
+            file.models[entry.model] = acc
+          }
+          accumulateEntry(acc, entry)
           migrated++
         }
       } catch { /* 跳过格式损坏的行 */ }
@@ -238,7 +127,12 @@ function percentile(arr: number[], p: number): number | null {
 export function updatePersistedStats(entry: LogEntry): void {
   try {
     const file = loadStatsFile()
-    applyEntryToModels(file.models, entry)
+    let acc = file.models[entry.model]
+    if (!acc) {
+      acc = createAccumulator(entry.model, entry.providerID)
+      file.models[entry.model] = acc
+    }
+    accumulateEntry(acc, entry)
     // 如果尚未完成迁移，先标记（避免 readPersistedStats 再重复迁移后与当前增量数据合并）
     // 实际上：首次有请求时 migratedFromLogs 必然为 false，
     // 所以 readPersistedStats 首次被调用时会重建全量历史，覆盖这个增量写入。
@@ -263,40 +157,8 @@ export function readPersistedStats(): ModelPerfStats[] {
       saveStatsFile(file)
     }
 
-    return Object.values(file.models).map(s => {
-      const ttftArr = [...s.ttftReservoir].sort((a, b) => a - b)
-      const latArr = [...s.latencyReservoir].sort((a, b) => a - b)
-      const denom = s.totalInput + s.totalCacheRead
-      return {
-        model: s.model,
-        providerID: s.providerID,
-        requestCount: s.requestCount,
-        ttftCount: s.ttftCount,
-        tpsCount: s.tpsCount,
-        latencyCount: s.latencyCount,
-        totalInput: s.totalInput,
-        totalOutput: s.totalOutput,
-        totalCacheRead: s.totalCacheRead,
-        totalCacheWrite: s.totalCacheWrite,
-        totalCost: s.totalCost,
-        avgTTFT: s.avgTTFT,
-        maxTTFT: s.maxTTFT,
-        minTTFT: s.minTTFT,
-        p50TTFT: percentile(ttftArr, 50),
-        p95TTFT: percentile(ttftArr, 95),
-        p99TTFT: percentile(ttftArr, 99),
-        avgTPS: s.avgTPS,
-        maxTPS: s.maxTPS,
-        minTPS: s.minTPS,
-        avgLatency: s.avgLatency,
-        maxLatency: s.maxLatency,
-        minLatency: s.minLatency,
-        p50Latency: percentile(latArr, 50),
-        p95Latency: percentile(latArr, 95),
-        p99Latency: percentile(latArr, 99),
-        cacheHitRate: denom > 0 ? (s.totalCacheRead / denom) * 100 : null,
-      }
-    })
+    // 旧版本统计文件缺少 last* 字段，finalize 内部统一归一化为 null
+    return Object.values(file.models).map((s) => finalizeAccumulator(s))
   } catch {
     return []
   }

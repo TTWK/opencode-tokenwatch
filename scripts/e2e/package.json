@@ -1,0 +1,8 @@
+{
+  "name": "opencode-tokenwatch-e2e",
+  "private": true,
+  "description": "Headless E2E smoke test: drives real opencode / opencode2 TUIs in a pseudo terminal (requires node-pty)",
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  }
+}

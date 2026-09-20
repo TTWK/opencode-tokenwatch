@@ -74,6 +74,10 @@ const zh: Record<string, string> = {
   menu7d: "最近 7 天",
   menu30d: "最近 30 天",
   menuAll: "全部时间",
+  noticeFirstScan: "首次统计需遍历全部历史会话，可能耗时数秒，请稍候…",
+  toastReportSaved: "报告已保存",
+  toastJsonSaved: "JSON 已导出",
+  toastError: "出错",
 }
 
 const en: Record<string, string> = {
@@ -148,6 +152,10 @@ const en: Record<string, string> = {
   menu7d: "Last 7 Days",
   menu30d: "Last 30 Days",
   menuAll: "All Time",
+  noticeFirstScan: "First run scans all historical sessions, this may take a few seconds…",
+  toastReportSaved: "Report saved",
+  toastJsonSaved: "JSON exported",
+  toastError: "Error",
 }
 
 let currentLang: SupportedLanguage = detectLanguage()

@@ -35,6 +35,23 @@ npm install opencode-tokenwatch
 }
 ```
 
+### 版本兼容性
+
+同一个 npm 包同时支持两代 OpenCode CLI，无需选择版本：
+
+| 宿主 | 版本 | 入口 | 历史数据来源 |
+|------|------|------|--------------|
+| OpenCode CLI | 1.x（1.18+） | `dist/tui.js` 的 `tui(api)` | `opencode db`（SQLite，快） |
+| OpenCode 2（`@opencode-ai/cli@beta`） | 0.0.0-beta | `dist/tui.js` 的 `setup(ctx)` | 客户端遍历会话重算 |
+
+两代宿主共用同一套内核（统计、性能追踪、HTML 报告、配置），差异全部折叠在各自适配层，
+行为一致。
+
+> **OpenCode 2 注意事项**
+> v2 移除了 `opencode db` 子命令，历史用量需在客户端遍历会话消息重算。
+> 首次执行 `/usage` 时会提示"正在首次扫描历史会话"，扫描结果在本次 TUI 进程内缓存，
+> 之后再次打开报告是即时的。
+
 ## 配置
 
 在 OpenCode TUI 中输入 `/usage` → **设置**，可交互式开关各显示项和切换界面语言，配置自动持久化，无需手动编辑配置文件。
@@ -58,14 +75,15 @@ npm install opencode-tokenwatch
 
 ## 系统要求
 
-- OpenCode CLI（支持 `opencode db` 命令）
+- OpenCode CLI 1.18+ 或 OpenCode 2（`@opencode-ai/cli@beta`）
 - Node.js 18+
 
 ## 构建
 
 ```sh
 npm install
-npm run build
+npm run build          # tsc 类型声明 + esbuild 打包
+node scripts/smoke-dual-host.mjs   # 双宿主契约冒烟测试
 ```
 
 ## 相关项目

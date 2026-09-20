@@ -451,6 +451,10 @@ export interface ModelPerfStats {
   p99Latency: number | null  // 端到端延迟 P99
   /** 该模型加权缓存命中率：cacheRead / (cacheRead + input) */
   cacheHitRate: number | null
+  /** 最近一次请求的 TTFT / TPS / 端到端延迟（与宿主单次口径可直接对照） */
+  lastTTFT: number | null
+  lastTPS: number | null
+  lastLatency: number | null
 }
 
 export interface TokenDistribution {

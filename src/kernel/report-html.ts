@@ -1,4 +1,4 @@
-import type { CombinedReportData, ModelBreakdownItem } from "./formatter.js"
+import type { CombinedReportData, ModelBreakdownItem } from "./format.js"
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B"
@@ -38,9 +38,10 @@ function renderKpiCards(data: CombinedReportData): string {
   const hitRatePct = fmtPercent(hitRate)
   let tpsSum = 0, tpsReqs = 0;
   for (const p of data.perfSummary) {
+    // 按"有 TPS 样本的请求数"加权：requestCount 含无 TPS 的请求，会引入偏差
     if (p.avgTPS != null && p.avgTPS > 0) {
-      tpsSum += p.avgTPS * p.requestCount;
-      tpsReqs += p.requestCount;
+      tpsSum += p.avgTPS * p.tpsCount;
+      tpsReqs += p.tpsCount;
     }
   }
   const avgTpsRaw = tpsReqs > 0 ? tpsSum / tpsReqs : 0
@@ -359,9 +360,10 @@ function renderProviderCards(data: CombinedReportData): string {
     const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider)
     let ttftSum = 0, ttftReqs = 0;
     for (const x of perfItems) {
+      // 按"有 TTFT 样本的请求数"加权（同 KPI 卡口径）
       if (x.avgTTFT != null && x.avgTTFT > 0) {
-        ttftSum += x.avgTTFT * x.requestCount;
-        ttftReqs += x.requestCount;
+        ttftSum += x.avgTTFT * x.ttftCount;
+        ttftReqs += x.ttftCount;
       }
     }
     const avgTtft = ttftReqs > 0 ? ttftSum / ttftReqs : null;
@@ -369,8 +371,8 @@ function renderProviderCards(data: CombinedReportData): string {
     let tpsSum = 0, tpsReqs = 0;
     for (const x of perfItems) {
       if (x.avgTPS != null && x.avgTPS > 0) {
-        tpsSum += x.avgTPS * x.requestCount;
-        tpsReqs += x.requestCount;
+        tpsSum += x.avgTPS * x.tpsCount;
+        tpsReqs += x.tpsCount;
       }
     }
     const avgTps = tpsReqs > 0 ? tpsSum / tpsReqs : null;

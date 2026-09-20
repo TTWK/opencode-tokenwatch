@@ -1,25 +1,13 @@
 import { createSignal, createMemo, createEffect, For, Show, onMount, onCleanup } from "solid-js"
-import type { TuiPluginApi, TuiTheme } from "@opencode-ai/plugin/tui"
 import { RGBA } from "@opentui/core"
-import { formatTokens, formatCost, formatDuration } from "./formatter.js"
-import { t as baseT, setLanguage } from "./i18n.js"
-import type { PerfTracker } from "./perf-tracker.js"
-import type { TokenMessage } from "./tui.js"
+import type { HostAdapter, KeyValueStore, ThemeColors } from "../host/types.js"
+import { formatTokens, formatCost, formatDuration } from "../kernel/format.js"
+import { t as baseT, setLanguage } from "../kernel/i18n.js"
+import type { PerfTracker } from "../kernel/perf.js"
+import type { TokenMessage } from "../kernel/model.js"
+import { loadConfig } from "../kernel/config.js"
+import type { SidebarConfig } from "../kernel/config.js"
 
-export interface SidebarConfig {
-  sidebar: {
-    showPerformance: boolean
-    showPricing: boolean
-    showTokenDistribution: boolean
-    showTrend: boolean
-  }
-  language: "zh" | "en" | "auto"
-}
-
-const DEFAULT_CONFIG: SidebarConfig = {
-  sidebar: { showPerformance: true, showPricing: true, showTokenDistribution: true, showTrend: true },
-  language: "auto",
-}
 
 function progressBarWidth(percent: number, width: number): number {
   if (percent >= 100) return width
@@ -93,25 +81,12 @@ function estimateTokens(text: string): number {
 
 interface CollapseState { global: boolean; models: Record<string, boolean>; subBlocks: Record<string, boolean> }
 
-function loadCollapseState(api: TuiPluginApi): CollapseState {
-  try { return (api.kv?.get?.("tokenwatch-collapse") as CollapseState) ?? { global: false, models: {}, subBlocks: {} } }
+function loadCollapseState(store: KeyValueStore): CollapseState {
+  try { return store.get<CollapseState>("tokenwatch-collapse", { global: false, models: {}, subBlocks: {} }) }
   catch { return { global: false, models: {}, subBlocks: {} } }
 }
-function saveCollapseState(api: TuiPluginApi, state: CollapseState): void {
-  try { api.kv?.set?.("tokenwatch-collapse", state) } catch { /* non-critical */ }
-}
-
-export function loadConfig(api: TuiPluginApi): SidebarConfig {
-  const base = { sidebar: { ...DEFAULT_CONFIG.sidebar }, language: DEFAULT_CONFIG.language }
-  try {
-    const pluginCfg = (api as any).config?.pluginConfig?.["opencode-tokenwatch"]
-    if (pluginCfg?.sidebar) Object.assign(base.sidebar, pluginCfg.sidebar)
-    if (pluginCfg?.language) base.language = pluginCfg.language
-    const overrides = api.kv?.get?.("tokenwatch-config") as Partial<SidebarConfig> | undefined
-    if (overrides?.sidebar) Object.assign(base.sidebar, overrides.sidebar)
-    if (overrides?.language) base.language = overrides.language
-  } catch { /* defaults */ }
-  return base
+function saveCollapseState(store: KeyValueStore, state: CollapseState): void {
+  try { store.set("tokenwatch-collapse", state) } catch { /* non-critical */ }
 }
 
 interface ModelAgg {
@@ -129,20 +104,23 @@ interface ModelAgg {
 }
 
 interface TokenWatchPanelProps {
-  api: TuiPluginApi
-  theme: TuiTheme
+  host: HostAdapter
   perfTracker: PerfTracker
   messages: () => readonly any[]
+  /** 绑定了当前会话的 part 查询（v2 下避免跨会话扫描） */
+  messageParts: (messageID: string) => readonly any[]
   allTokenMessages: () => TokenMessage[]
 }
 
 export function TokenWatchPanel(props: TokenWatchPanelProps) {
-  const { api, theme, perfTracker } = props
+  const { host, perfTracker } = props
+  const store = host.store
+  const theme = () => host.theme()
   const getMessages = () => props.messages()
-  const [config, setConfig] = createSignal<SidebarConfig>(loadConfig(api))
+  const [config, setConfig] = createSignal<SidebarConfig>(loadConfig(store, host.appConfig() as any))
   // 同步初始化语言以防首帧渲染使用错误的 detectLanguage 默认值
   setLanguage(config().language)
-  let knownCfgVer = api.kv?.get?.("tokenwatch-config-version") as number | undefined
+  let knownCfgVer = store.get<number | undefined>("tokenwatch-config-version", undefined)
 
   // ── 响应式翻译函数 ──
   const t = (key: string) => {
@@ -156,16 +134,16 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
   createEffect(() => {
     const timer = setInterval(() => {
-      const v = api.kv?.get?.("tokenwatch-config-version") as number | undefined
+      const v = store.get<number | undefined>("tokenwatch-config-version", undefined)
       if (v != null && v !== knownCfgVer) {
         knownCfgVer = v
-        setConfig(loadConfig(api))
+        setConfig(loadConfig(store, host.appConfig() as any))
       }
     }, 500)
     onCleanup(() => clearInterval(timer))
   })
 
-  const [collapse, setCollapse] = createSignal<CollapseState>(loadCollapseState(api))
+  const [collapse, setCollapse] = createSignal<CollapseState>(loadCollapseState(store))
 
   // ── 真实面板宽度：通过 ref + onSizeChange 从渲染引擎获取 ──
   // 初始值给一个合理默认，渲染后立即更新为实际值
@@ -175,8 +153,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   createEffect(() => setLanguage(config().language))
 
   // ── 颜色 helpers ──
-  const primaryColor = (): RGBA => theme.current.primary
-  const mutedColor = (): RGBA => theme.current.textMuted
+  const primaryColor = (): RGBA => theme().primary
+  const mutedColor = (): RGBA => theme().textMuted
   const dimColor = (): RGBA => RGBA.fromInts(72, 79, 88, 255)
   const greenColor = (): RGBA => RGBA.fromInts(63, 185, 80, 255)
   const borderColor = (): RGBA => RGBA.fromInts(55, 65, 80, 255)
@@ -271,7 +249,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
     const dist: Record<string, number> = {}
 
     try {
-      const cfg = api.state.config as Record<string, unknown>
+      const cfg = host.appConfig()
       const agents = cfg?.agent as Record<string, unknown> | undefined
       if (agents) {
         for (const ac of Object.values(agents)) {
@@ -285,11 +263,12 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
     } catch { }
 
     for (const msg of getMessages()) {
-      const role = (msg as any).role
+      // v1 消息带 role，v2 消息带 type
+      const role = (msg as any).type ?? (msg as any).role
       if (role === "user") {
         if ((msg as any).system) dist.system = (dist.system ?? 0) + estimateTokens((msg as any).system)
         let parts: readonly any[] = []
-        try { parts = api.state.part((msg as any).id) } catch { continue }
+        try { parts = props.messageParts((msg as any).id) } catch { continue }
         for (const p of parts) {
           if (p.type === "text" && !p.synthetic && !p.ignored) {
             dist.user = (dist.user ?? 0) + estimateTokens(p.text ?? "")
@@ -299,7 +278,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
         }
       } else if (role === "assistant") {
         let parts: readonly any[] = []
-        try { parts = api.state.part((msg as any).id) } catch { continue }
+        try { parts = props.messageParts((msg as any).id) } catch { continue }
         let msgEstimatedOutput = 0
         for (const p of parts) {
           if (p.type === "tool") {
@@ -343,13 +322,13 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
 
   // ── 折叠状态 toggle ──
   const toggle = {
-    global: () => setCollapse(p => { const n = { ...p, global: !p.global }; saveCollapseState(api, n); return n }),
-    model: (k: string) => setCollapse(p => { const n = { ...p, models: { ...p.models, [k]: !p.models[k] } }; saveCollapseState(api, n); return n }),
-    sub: (k: string) => setCollapse(p => { const n = { ...p, subBlocks: { ...p.subBlocks, [k]: !p.subBlocks[k] } }; saveCollapseState(api, n); return n }),
+    global: () => setCollapse(p => { const n = { ...p, global: !p.global }; saveCollapseState(store, n); return n }),
+    model: (k: string) => setCollapse(p => { const n = { ...p, models: { ...p.models, [k]: !p.models[k] } }; saveCollapseState(store, n); return n }),
+    sub: (k: string) => setCollapse(p => { const n = { ...p, subBlocks: { ...p.subBlocks, [k]: !p.subBlocks[k] } }; saveCollapseState(store, n); return n }),
   }
 
   onMount(() => {
-    const unsubPart = api.event?.on?.("message.part.updated", () => setPartVersion(v => v + 1))
+    const unsubPart = host.onPartUpdated(() => setPartVersion(v => v + 1))
     onCleanup(() => { try { unsubPart?.() } catch { } })
   })
 
@@ -599,12 +578,12 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                         : null}
                     </text>
 
-                    {/* 性能指标 */}
+                    {/* 性能指标：显示最近一次请求（与宿主 footer 的单次口径可直接对照） */}
                     <Show when={config().sidebar.showPerformance && !!perfStats().models[key]}>
                       <text fg={mutedColor()} marginTop={1}>
-                        {t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.avgTTFT ?? null)}</span>
-                        {"  "}{t("tps")} <span style={{ fg: primaryColor() } as any}>{perfStats().models[key]?.avgTPS?.toFixed(1) ?? "—"}</span>
-                        {"  "}{t("lat")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.avgLatency ?? null)}</span>
+                        {t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.lastTTFT ?? null)}</span>
+                        {"  "}{t("tps")} <span style={{ fg: primaryColor() } as any}>{perfStats().models[key]?.lastTPS?.toFixed(1) ?? "—"}</span>
+                        {"  "}{t("lat")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.lastLatency ?? null)}</span>
                       </text>
                     </Show>
 

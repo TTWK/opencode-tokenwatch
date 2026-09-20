@@ -9,7 +9,7 @@ import type {
   SessionTokenData,
   UsageFilters,
   UsageReport,
-} from "./formatter.js"
+} from "../../kernel/format.js"
 
 /**
  * 构建包含 opencode 可执行文件路径的 PATH 环境变量。
@@ -200,11 +200,6 @@ export function getPresetRange(preset: "all" | "7d" | "30d" | "month"): Pick<Usa
   return { startDate: format(start), endDate: format(end) }
 }
 
-export async function getCurrentSessionStats(sessionId?: string): Promise<SessionTokenData> {
-  const filters: UsageFilters = sessionId ? { sessionId } : {}
-  return getSummary(filters)
-}
-
 export async function getSummary(filters: UsageFilters = {}): Promise<SessionTokenData> {
   const sql = `
 SELECT
@@ -367,31 +362,6 @@ LIMIT ${Math.max(1, limit)}
   }))
 }
 
-export async function getAvailableModels(): Promise<string[]> {
-  const sql = `
-SELECT distinct coalesce(json_extract(m.data, '$.modelID'), 'unknown') as value
-FROM message m
-WHERE ${messageWhere({})}
-ORDER BY value ASC
-  `.trim()
-
-  const rows = await queryDb<DistinctValueRow>(sql)
-  return rows.map((row) => row.value ?? "unknown")
-}
-
-export async function getAvailableProviders(): Promise<string[]> {
-  const sql = `
-SELECT distinct coalesce(json_extract(m.data, '$.providerID'), 'unknown') as value
-FROM message m
-WHERE ${messageWhere({})}
-ORDER BY value ASC
-  `.trim()
-
-  const rows = await queryDb<DistinctValueRow>(sql)
-  return rows.map((row) => row.value ?? "unknown")
-}
-
-/** 失败请求计数 SQL。1次运行获取成功数＋失败数＋按模型细分 */
 export async function getErrorStats(filters: UsageFilters = {}): Promise<ErrorStats> {
   // 构建日期／Session/Provider/Model 过滤条件（不包含 tokens.total > 0 过滤）
   const baseConds: string[] = [
@@ -459,77 +429,4 @@ export async function getUsageReport(filters: UsageFilters = {}): Promise<UsageR
   ])
 
   return { filters, summary, models, providers, daily, sessions, errors }
-}
-
-function csvEscape(value: string | number): string {
-  const text = String(value)
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text
-}
-
-export function exportReportAsCsv(report: UsageReport, section: "models" | "providers" | "daily" | "sessions"): string {
-  if (section === "models") {
-    const header = ["provider", "model", "requests", "sessions", "totalTokens", "inputTokens", "outputTokens", "reasoningTokens", "cacheRead", "totalCost"]
-    const rows = report.models.map((item) => [
-      item.provider,
-      item.model,
-      item.requests,
-      item.sessions,
-      item.totalTokens,
-      item.inputTokens,
-      item.outputTokens,
-      item.reasoningTokens,
-      item.cacheRead,
-      item.totalCost,
-    ])
-    return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n")
-  }
-
-  if (section === "providers") {
-    const header = ["provider", "requests", "sessions", "totalTokens", "inputTokens", "outputTokens", "reasoningTokens", "cacheRead", "totalCost"]
-    const rows = report.providers.map((item) => [
-      item.provider,
-      item.requests,
-      item.sessions,
-      item.totalTokens,
-      item.inputTokens,
-      item.outputTokens,
-      item.reasoningTokens,
-      item.cacheRead,
-      item.totalCost,
-    ])
-    return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n")
-  }
-
-  if (section === "daily") {
-    const header = ["day", "requests", "sessions", "totalTokens", "inputTokens", "outputTokens", "reasoningTokens", "cacheRead", "totalCost"]
-    const rows = report.daily.map((item) => [
-      item.day,
-      item.requests,
-      item.sessions,
-      item.totalTokens,
-      item.inputTokens,
-      item.outputTokens,
-      item.reasoningTokens,
-      item.cacheRead,
-      item.totalCost,
-    ])
-    return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n")
-  }
-
-  const header = ["day", "sessionId", "title", "provider", "model", "requests", "totalTokens", "inputTokens", "outputTokens", "reasoningTokens", "cacheRead", "totalCost"]
-  const rows = report.sessions.map((item) => [
-    item.day,
-    item.sessionId,
-    item.title,
-    item.provider,
-    item.model,
-    item.requests,
-    item.totalTokens,
-    item.inputTokens,
-    item.outputTokens,
-    item.reasoningTokens,
-    item.cacheRead,
-    item.totalCost,
-  ])
-  return [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n")
 }
