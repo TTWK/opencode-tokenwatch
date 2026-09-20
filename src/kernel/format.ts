@@ -79,7 +79,7 @@ export interface ErrorStats {
   successCount: number
   /** 失败请求数（tokens.total == 0 的 assistant） */
   failedCount: number
-  /** 失败率：failedCount / (successCount + failedCount) */
+  /** 失败率：failedCount / (successCount + failedCount)，小数口径（0~1），两代宿主一致 */
   errorRate: number
   /** 按模型细化的失败数 */
   byModel: Array<{ provider: string; model: string; failed: number; total: number }>
@@ -93,6 +93,8 @@ export interface UsageReport {
   daily: DailyBreakdownItem[]
   sessions: SessionBreakdownItem[]
   errors?: ErrorStats
+  /** daily 明细被数据源截断（未覆盖全部日期）时为 true，报告 UI 据此提示 */
+  dailyTruncated?: boolean
 }
 
 interface Column {
@@ -457,16 +459,6 @@ export interface ModelPerfStats {
   lastLatency: number | null
 }
 
-export interface TokenDistribution {
-  system: number
-  user: number
-  agent: number
-  toolCall: number
-  toolResult: number
-  output: number
-  total: number
-}
-
 export interface LogEntry {
   ts: string
   model: string
@@ -500,4 +492,6 @@ export interface CombinedReportData {
   perfLogs: LogEntry[]
   perfSummary: ModelPerfStats[]
   meta: HtmlReportMeta
+  /** daily 明细被数据源截断时为 true（来自 UsageReport），报告时间线区据此提示 */
+  dailyTruncated?: boolean
 }

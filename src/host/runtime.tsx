@@ -53,10 +53,14 @@ function toPerfPartEvent(p: NormalizedPartEvent) {
 function rebuildFromMessages(sessionID: string, messages: readonly any[]): TokenMessage[] {
   const out: TokenMessage[] = []
   for (const msg of messages) {
+    // v1 的 state.session.messages 形状随宿主版本变动：平铺字段可能嵌在 info 层，
+    // 逐字段做双层兜底，避免重建得到空数组
+    const info = msg?.info ?? {}
+    const m = { ...info, ...msg }
     // v1 消息带 role，v2 消息带 type —— 两者都接受
-    const kind = msg?.type ?? msg?.role
+    const kind = m.type ?? m.role
     if (kind !== "assistant") continue
-    const tokens = msg.tokens
+    const tokens = m.tokens
     if (!tokens) continue
     // v2 的 TokenUsageInfo 没有 total 字段，按五分量现算
     const total =
@@ -64,21 +68,27 @@ function rebuildFromMessages(sessionID: string, messages: readonly any[]): Token
       (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
     if (total === 0) continue
     out.push({
-      id: msg.id,
+      id: m.id,
       sessionID,
       // v1 平铺 providerID/modelID；v2 嵌套在 model 里
-      providerID: msg.model?.providerID ?? msg.providerID ?? "unknown",
-      modelID: msg.model?.id ?? msg.modelID ?? "unknown",
+      providerID: m.model?.providerID ?? m.providerID ?? "unknown",
+      modelID: m.model?.id ?? m.modelID ?? "unknown",
       inputTokens: tokens.input ?? 0,
       outputTokens: tokens.output ?? 0,
       reasoningTokens: tokens.reasoning ?? 0,
       cacheRead: tokens.cache?.read ?? 0,
       cacheWrite: tokens.cache?.write ?? 0,
-      cost: msg.cost ?? 0,
+      cost: m.cost ?? 0,
     })
   }
   return out
 }
+
+/** 消息数组的 KV 写节流窗口：流式期间每条消息更新都会触发，合并为低频落盘 */
+const PERSIST_DEBOUNCE_MS = 500
+/** KV 中保留消息数组缓存的会话数上限（MRU 淘汰，防止 KV 无界膨胀） */
+const KV_SESSION_KEEP = 20
+const SESSION_INDEX_KEY = "tokenwatch-session-index"
 
 /**
  * 启动 TokenWatch 共享核心，返回卸载函数。
@@ -92,9 +102,49 @@ export function startTokenWatch(host: HostAdapter): () => void {
   let currentSessionID = ""
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  const persist = (sessionID: string, msgs: TokenMessage[]): void => {
+  // 写节流状态：burst 内只保留最新负载，定时器到期一次性落盘
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let persistSession = ""
+  let persistMsgs: TokenMessage[] = []
+
+  const persistNow = (sessionID: string, msgs: TokenMessage[]): void => {
     try {
       host.store.set(kvKey(sessionID), msgs)
+    } catch { /* non-critical */ }
+  }
+
+  /** 尾沿节流：burst 开始后 ≤500ms 必写一次，期间连续更新只保留最后一份 */
+  const persistThrottled = (sessionID: string, msgs: TokenMessage[]): void => {
+    persistSession = sessionID
+    persistMsgs = msgs
+    if (persistTimer) return
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      persistNow(persistSession, persistMsgs)
+    }, PERSIST_DEBOUNCE_MS)
+  }
+
+  const flushPersist = (): void => {
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    if (persistMsgs.length > 0) persistNow(persistSession, persistMsgs)
+  }
+
+  /** 维护会话 MRU 索引并淘汰超出上限的 KV 条目（宿主无 delete 时优雅降级为仅索引封顶） */
+  const evictOldSessions = (sessionID: string): void => {
+    try {
+      const index = host.store.get<string[]>(SESSION_INDEX_KEY, []).filter(Boolean)
+      const next = [sessionID, ...index.filter((id) => id !== sessionID)].slice(0, KV_SESSION_KEEP)
+      host.store.set(SESSION_INDEX_KEY, next)
+      if (typeof host.store.delete === "function") {
+        for (const id of index.slice(KV_SESSION_KEEP)) {
+          if (!next.includes(id)) {
+            try { host.store.delete(kvKey(id)) } catch { /* non-critical */ }
+          }
+        }
+      }
     } catch { /* non-critical */ }
   }
 
@@ -102,7 +152,9 @@ export function startTokenWatch(host: HostAdapter): () => void {
   const switchSession = (sessionID: string): void => {
     if (!sessionID || sessionID === currentSessionID) return
     currentSessionID = sessionID
-    perfTracker.loadSession(sessionID)
+    // JSONL 重放是异步的（内部有过期令牌，快速切换不会串话）
+    void perfTracker.loadSession(sessionID)
+    evictOldSessions(sessionID)
 
     if (pollTimer) {
       clearInterval(pollTimer)
@@ -135,9 +187,9 @@ export function startTokenWatch(host: HostAdapter): () => void {
       const rebuilt = rebuildFromMessages(sessionID, existing)
       setAllTokenMessages((prev) => {
         if (prev.length >= rebuilt.length) return prev
-        persist(sessionID, rebuilt)
         return rebuilt
       })
+      persistThrottled(sessionID, rebuilt)
       if (pollTimer) {
         clearInterval(pollTimer)
         pollTimer = null
@@ -150,34 +202,29 @@ export function startTokenWatch(host: HostAdapter): () => void {
     onMessageUpdated(event) {
       perfTracker.handleMessageUpdated(toPerfMessageEvent(event))
 
-      // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）
+      // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）。
+      // 事件处理器是串行的，先读后写不与 updater 副作用混用，保持 setSignal 纯净。
       if (event.role === "assistant" && event.total > 0) {
-        setAllTokenMessages((prev) => {
-          const msg: TokenMessage = {
-            id: event.messageID,
-            sessionID: event.sessionID,
-            providerID: event.providerID,
-            modelID: event.modelID,
-            inputTokens: event.input,
-            outputTokens: event.output,
-            reasoningTokens: event.reasoning,
-            cacheRead: event.cacheRead,
-            cacheWrite: event.cacheWrite,
-            cost: event.cost,
-          }
-          const idx = prev.findIndex((m) => m.id === msg.id)
-          let next: TokenMessage[]
-          if (idx >= 0) {
-            next = [...prev]
-            next[idx] = msg
-          } else {
-            next = [...prev, msg]
-          }
-          // 优先使用事件自带的 sessionID，避免 slot 渲染时序导致的错存
-          const target = event.sessionID || currentSessionID
-          persist(target, next)
-          return next
-        })
+        const msg: TokenMessage = {
+          id: event.messageID,
+          sessionID: event.sessionID,
+          providerID: event.providerID,
+          modelID: event.modelID,
+          inputTokens: event.input,
+          outputTokens: event.output,
+          reasoningTokens: event.reasoning,
+          cacheRead: event.cacheRead,
+          cacheWrite: event.cacheWrite,
+          cost: event.cost,
+        }
+        const prev = allTokenMessages()
+        const idx = prev.findIndex((m) => m.id === msg.id)
+        const next = idx >= 0
+          ? prev.map((m, i) => (i === idx ? msg : m))
+          : [...prev, msg]
+        setAllTokenMessages(next)
+        // 优先使用事件自带的 sessionID，避免 slot 渲染时序导致的错存
+        persistThrottled(event.sessionID || currentSessionID, next)
       }
 
       setSidebarRevision((v) => v + 1)
@@ -196,7 +243,10 @@ export function startTokenWatch(host: HostAdapter): () => void {
   host.registerSidebar((input) => {
     // 读取 revision 以建立响应式依赖：事件到达时插槽重新渲染
     sidebarRevision()
-    switchSession(input.sessionID)
+    // 会话切换含 KV 读取、信号写入等副作用，不能在渲染上下文里同步执行，
+    // 推迟到微任务中（ Solid 会在信号变化后自动重渲染本插槽）
+    const sid = input.sessionID
+    queueMicrotask(() => switchSession(sid))
 
     return (
       <TokenWatchPanel
@@ -215,19 +265,16 @@ export function startTokenWatch(host: HostAdapter): () => void {
     )
   })
 
-  host.onDispose(() => {
+  const disposeAll = (): void => {
     unsubscribe()
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
-  })
-
-  return () => {
-    unsubscribe()
+    flushPersist()
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
     }
   }
+
+  host.onDispose(disposeAll)
+
+  return disposeAll
 }

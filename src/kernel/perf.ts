@@ -1,12 +1,14 @@
 import type { LogEntry, ModelPerfStats, SessionPerfStats } from "./format.js"
 import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { existsSync, statSync } from "node:fs"
 import { updatePersistedStats } from "./store.js"
 
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
+/** rename 轮转后的上一代日志（保存更早历史，stats 迁移会一并读取） */
+const LOG_PATH_ROTATED = LOG_PATH + ".1"
 
 interface PartEvent {
   message_id?: string
@@ -48,9 +50,8 @@ class PerfTracker {
   /** 最早的输出 part（text/reasoning）—— 用作 TTFT（用户等待首个可见 token 的时间） */
   private firstOutputTimes = new Map<string, number>()
   private statsMap = new Map<string, ModelAccumulator>()
-  /** 原始样本串，用于分位数计算，不持久化 */
-  private ttftSamples = new Map<string, number[]>()
-  private latencySamples = new Map<string, number[]>()
+  /** 会话加载令牌：异步重放期间再次切会话时，旧加载结果按令牌过期丢弃 */
+  private loadToken = 0
 
   handlePartUpdated(event: PartEvent): void {
     if (!event.time?.start || !event.message_id) return
@@ -61,10 +62,15 @@ class PerfTracker {
     }
     // TTFT 只统计"首 token"锚点：v1 的输出 part（text/reasoning/tool 的
     // time.start 即首 token）与 v2 的 delta 事件（首个内容片段）。
-    // v2 的 text/reasoning "started" 事件是 part 占位符打开时刻（≈ step 开始，
-    // 恒为个位数 ms），step 锚点同理 —— 两者都不参与 TTFT。
-    const isDelta = event.type != null && event.type.endsWith("-delta")
-    const isFirstTokenAnchor = isDelta || (event.type !== "step" && event.type !== "part-open")
+    // 窗口锚点（v2 的 step / part-open，v1 的 step-start / step-finish，
+    // 以及一切 *-started 占位符打开事件）标记的是"请求/阶段开始"而非首
+    // token，只参与 TPS 窗口，不参与 TTFT —— 否则 v1 的 TTFT 会恒为毫秒级。
+    const type = event.type
+    const isDelta = type != null && type.endsWith("-delta")
+    const isWindowAnchor = type === "step" || type === "part-open"
+      || type === "step-start" || type === "step-finish"
+      || (type != null && type.endsWith("-started"))
+    const isFirstTokenAnchor = isDelta || !isWindowAnchor
     if (isFirstTokenAnchor) {
       const curOut = this.firstOutputTimes.get(event.message_id) ?? Number.POSITIVE_INFINITY
       if (event.time.start < curOut) {
@@ -146,14 +152,13 @@ class PerfTracker {
 
   private appendLog(entry: LogEntry): void {
     try {
-      // Risk fix: JSONL 日志轮转保护，防止长期使用后文件无限增长
-      // 超过 5MB 时截断，保留最新 2000 行
-      // 注意：轮转前先调用 updatePersistedStats，确保被轮转行的数据已持久化
+      // Risk fix: JSONL 日志轮转保护，防止长期使用后文件无限增长。
+      // rename 轮转（原子）替代整读整写：进程崩溃不会截断日志，
+      // 上一代数据完整保留在 .1 文件中供 stats 迁移读取。
       const MAX_SIZE = 5 * 1024 * 1024  // 5 MB
-      const KEEP_LINES = 2000
       if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > MAX_SIZE) {
-        const lines = readFileSync(LOG_PATH, "utf-8").trim().split("\n")
-        writeFileSync(LOG_PATH, lines.slice(-KEEP_LINES).join("\n") + "\n")
+        try { unlinkSync(LOG_PATH_ROTATED) } catch { /* 首次轮转无旧文件 */ }
+        renameSync(LOG_PATH, LOG_PATH_ROTATED)
       }
       appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n")
     } catch {
@@ -232,28 +237,33 @@ class PerfTracker {
   }
 
   reset(): void {
+    this.loadToken++
     this.firstPartTimes.clear()
     this.firstOutputTimes.clear()
     this.statsMap.clear()
-    this.ttftSamples.clear()
-    this.latencySamples.clear()
   }
 
-  loadSession(sessionID: string): void {
+  /**
+   * 切换会话：清空内存态后异步重放该会话的 JSONL 历史。
+   *
+   * 异步化是为了不阻塞 TUI 渲染线程（5MB 日志的同步读可达数十毫秒）；
+   * 重放完成前若又切换了会话，由 loadToken 令牌丢弃过期结果。
+   */
+  async loadSession(sessionID: string): Promise<void> {
+    const token = ++this.loadToken
     this.firstPartTimes.clear()
     this.firstOutputTimes.clear()
     this.statsMap.clear()
-    this.ttftSamples.clear()
-    this.latencySamples.clear()
 
     if (!sessionID) return
 
     try {
       if (!existsSync(LOG_PATH)) return
-      const content = readFileSync(LOG_PATH, "utf-8").trim()
-      if (!content) return
-      const lines = content.split("\n")
-      for (const line of lines) {
+      const content = await readFile(LOG_PATH, "utf-8")
+      if (token !== this.loadToken) return // 期间又切换了会话，丢弃过期加载
+      const trimmed = content.trim()
+      if (!trimmed) return
+      for (const line of trimmed.split("\n")) {
         if (!line) continue
         try {
           const entry = JSON.parse(line) as LogEntry

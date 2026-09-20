@@ -8,7 +8,7 @@
  * - 首次启动时自动从现有 JSONL 日志迁移，不丢失历史数据
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import type { LogEntry, ModelPerfStats } from "./format.js"
@@ -16,8 +16,10 @@ import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccu
 
 const STATS_PATH = join(homedir(), ".opencode", "tokenwatch-stats.json")
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
-const RESERVOIR_SIZE = 500   // 每个指标最多保留的原始样本数
+const LOG_PATH_ROTATED = LOG_PATH + ".1"
 const CURRENT_VERSION = 1
+/** 合并落盘窗口：窗口内的多次增量只做一次同步 I/O，降低 TUI 线程卡顿 */
+const WRITE_COALESCE_MS = 1000
 
 interface StatsFile {
   version: number
@@ -43,35 +45,69 @@ function loadStatsFile(): StatsFile {
   return { version: CURRENT_VERSION, updatedAt: "", migratedFromLogs: false, models: {} }
 }
 
-function saveStatsFile(file: StatsFile): void {
+/** 原子写：先写临时文件再 rename，写入中途崩溃不会损坏既有统计 */
+function saveStatsFileNow(file: StatsFile): void {
   try {
     file.updatedAt = new Date().toISOString()
-    writeFileSync(STATS_PATH, JSON.stringify(file), "utf-8")
+    const tmpPath = STATS_PATH + ".tmp"
+    writeFileSync(tmpPath, JSON.stringify(file), "utf-8")
+    renameSync(tmpPath, STATS_PATH)
   } catch { /* 写入失败不影响主流程 */ }
 }
+
+// 合并写状态：pending 持有尚未落盘的累计结果，flushSoon 保证至多每秒一次同步写
+let pending: StatsFile | null = null
+let flushScheduled = false
+let lastFlushAt = 0
+
+function flushNow(): void {
+  const file = pending
+  if (!file) return
+  pending = null
+  lastFlushAt = Date.now()
+  saveStatsFileNow(file)
+}
+
+function flushSoon(): void {
+  if (flushScheduled) return
+  flushScheduled = true
+  const timer = setTimeout(() => {
+    flushScheduled = false
+    flushNow()
+  }, Math.max(0, WRITE_COALESCE_MS - (Date.now() - lastFlushAt)))
+  timer.unref?.() // 不阻止宿主进程退出
+}
+
+// 进程退出前把未落盘的增量写出去（exit 回调只能做同步操作，writeFileSync 满足）
+process.once("exit", () => { flushNow() })
 
 // ─────────────────────────────────────────────
 // 一次性迁移：从 JSONL 日志重建初始统计
 // ─────────────────────────────────────────────
 
+/** 读取单个日志文件的行（不存在/损坏时返回空） */
+function readLogLines(path: string): string[] {
+  try {
+    if (!existsSync(path)) return []
+    return readFileSync(path, "utf-8").trim().split("\n").filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /**
  * 如果统计文件尚未完成迁移，则读取全量 JSONL 日志并批量写入统计文件。
  * 只在首次调用 readPersistedStats() 时执行一次，之后通过 migratedFromLogs 标志跳过。
+ * 轮转产生的 .1 文件保存更早的历史，也一并纳入（旧数据只存在于其中一个文件）。
  */
 function migrateFromLogsIfNeeded(file: StatsFile): boolean {
   if (file.migratedFromLogs) return false
-  if (!existsSync(LOG_PATH)) {
-    file.migratedFromLogs = true
-    return true
-  }
+  const lines = [...readLogLines(LOG_PATH_ROTATED), ...readLogLines(LOG_PATH)]
+  file.migratedFromLogs = true
+  if (lines.length === 0) return true
   try {
-    const content = readFileSync(LOG_PATH, "utf-8").trim()
-    if (!content) {
-      file.migratedFromLogs = true
-      return true
-    }
     let migrated = 0
-    for (const line of content.split("\n")) {
+    for (const line of lines) {
       if (!line) continue
       try {
         const entry = JSON.parse(line) as LogEntry
@@ -86,7 +122,6 @@ function migrateFromLogsIfNeeded(file: StatsFile): boolean {
         }
       } catch { /* 跳过格式损坏的行 */ }
     }
-    file.migratedFromLogs = true
     if (migrated > 0) {
       // 标记本次迁移来源，便于调试
       ;(file as any)._migratedFrom = `${LOG_PATH} (${migrated} entries)`
@@ -94,23 +129,8 @@ function migrateFromLogsIfNeeded(file: StatsFile): boolean {
     return true
   } catch {
     // 迁移失败时仍标记为已完成，避免每次都重试（下次重建会通过 updatePersistedStats 增量补充）
-    file.migratedFromLogs = true
     return true
   }
-}
-
-// ─────────────────────────────────────────────
-// 分位数计算
-// ─────────────────────────────────────────────
-
-function percentile(arr: number[], p: number): number | null {
-  if (arr.length === 0) return null
-  if (arr.length === 1) return arr[0]
-  const idx = (p / 100) * (arr.length - 1)
-  const lo = Math.floor(idx)
-  const hi = Math.ceil(idx)
-  if (lo === hi) return arr[lo]
-  return arr[lo] + (arr[hi] - arr[lo]) * (idx - lo)
 }
 
 // ─────────────────────────────────────────────
@@ -119,42 +139,41 @@ function percentile(arr: number[], p: number): number | null {
 
 /**
  * 将一条新的日志条目增量更新到持久化统计文件。
- * 在 perf-tracker.ts 的 appendLog() 之后调用。
+ * 在 perf-tracker 的 appendLog() 之后调用。
  *
- * 设计原则：本函数只做增量更新，迁移逻辑由 readPersistedStats() 负责。
- * 这样可以避免迁移与增量更新之间的竞态问题。
+ * 增量先累积在内存副本上（至多每 WRITE_COALESCE_MS 落盘一次），
+ * 进程正常退出时由 exit 钩子强制刷盘。
  */
 export function updatePersistedStats(entry: LogEntry): void {
   try {
-    const file = loadStatsFile()
+    // 优先在未落盘的内存副本上累积；为空时从磁盘加载（也读入其他宿主进程的写入）
+    const file = pending ?? loadStatsFile()
+    pending = file
     let acc = file.models[entry.model]
     if (!acc) {
       acc = createAccumulator(entry.model, entry.providerID)
       file.models[entry.model] = acc
     }
     accumulateEntry(acc, entry)
-    // 如果尚未完成迁移，先标记（避免 readPersistedStats 再重复迁移后与当前增量数据合并）
-    // 实际上：首次有请求时 migratedFromLogs 必然为 false，
-    // 所以 readPersistedStats 首次被调用时会重建全量历史，覆盖这个增量写入。
-    // 这是可接受的：迁移完成后统计文件是完整的（含本条目，因为 JSONL 已先写入）。
-    saveStatsFile(file)
+    flushSoon()
   } catch { /* 统计写入失败不影响主流程 */ }
 }
 
 /**
  * 读取所有持久化统计，返回 ModelPerfStats 数组（含分位数）。
- * 用于 HTML 报告生成，替代 aggregatePerfStats(readLogs(N)) 的有限窗口方案。
+ * 用于 HTML 报告生成，替代有限窗口的日志聚合方案。
  */
 export function readPersistedStats(): ModelPerfStats[] {
   try {
-    const file = loadStatsFile()
+    const file = pending ?? loadStatsFile()
+    pending = file
     // 如果尚未迁移（例如首次生成报告前没有任何请求），执行迁移
     // 迁移时先清空 models，以 JSONL 全量数据为唯一权威来源，
     // 避免与 updatePersistedStats 先写入的零散增量数据叠加导致重复计数。
     if (!file.migratedFromLogs) {
       file.models = {}  // 清空，让迁移从零开始重建
       migrateFromLogsIfNeeded(file)
-      saveStatsFile(file)
+      flushNow()  // 迁移是低频操作，直接同步落盘
     }
 
     // 旧版本统计文件缺少 last* 字段，finalize 内部统一归一化为 null

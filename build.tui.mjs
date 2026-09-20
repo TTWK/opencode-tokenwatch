@@ -1,5 +1,6 @@
 import { build } from "esbuild"
 import { solidPlugin } from "esbuild-plugin-solid"
+import { readFileSync } from "node:fs"
 
 /**
  * esbuild build script for opencode-tokenwatch TUI plugin.
@@ -46,12 +47,29 @@ await Promise.all([
       solid: { moduleName: "@opentui/solid", generate: "universal" },
     })],
   }),
-  // Server module - no JSX
+  // Server module - no JSX.
+  // ./tui.js 必须保持 external：若被 bundle 进来，esbuild 会把整个 TUI 代码图
+  // （含未走 solidPlugin 的 .tsx JSX，回退 classic transform 生成未导入的
+  // React.createElement）内联进 server.js，并把 @opentui/solid-js 导入提升到
+  // 文件顶部 —— server 进程的惰性加载设计即被破坏。
+  // external 后产物保留 import("./tui.js")，运行时才解析 dist/tui.js。
   build({
     ...common,
     entryPoints: ["src/server.ts"],
     outfile: "dist/server.js",
+    external: [...external, "./tui.js"],
   }),
 ])
+
+// ── 产物断言：防止 server.js 再次吞下 TUI 代码图（曾因未加 external 而发生过） ──
+const serverJs = readFileSync("dist/server.js", "utf-8")
+if (serverJs.includes("React.createElement") || /import\s[^;]*["@']@opentui\//.test(serverJs)) {
+  console.error("✗ dist/server.js 泄漏了 TUI 代码图（React.createElement 或 @opentui 静态导入）——惰性加载已失效")
+  process.exit(1)
+}
+if (!serverJs.includes('import("./tui.js")')) {
+  console.error('✗ dist/server.js 丢失了对 ./tui.js 的动态 import')
+  process.exit(1)
+}
 
 console.log("✓ esbuild: dist/tui.js + dist/server.js")

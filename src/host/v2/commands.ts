@@ -110,5 +110,5 @@ export function registerV2Commands(host: HostAdapter): void {
       run: () => showUsageMenu(host),
     },
   ]
-  host.registerCommands(specs)
+  host.registerCommands?.(specs)
 }

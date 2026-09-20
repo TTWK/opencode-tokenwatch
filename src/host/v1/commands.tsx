@@ -7,12 +7,14 @@
  */
 import type { TuiDialogStack, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { getUsageReport, getPresetRange } from "./data-source.js"
+import { makeStore } from "./adapter.js"
 import type { UsageFilters } from "../../kernel/format.js"
 import { formatUsageReport } from "../../kernel/format.js"
 import {
   buildCombinedData,
   ensureReportDir,
   getRangeSlug,
+  localDateStr,
   openInBrowser,
   writeHtmlReport,
 } from "../../kernel/report.js"
@@ -20,9 +22,9 @@ import { t, setLanguage } from "../../kernel/i18n.js"
 import type { SupportedLanguage } from "../../kernel/i18n.js"
 import type { SidebarConfig, SidebarToggleKey } from "../../kernel/config.js"
 import {
-  bumpVersion,
   loadConfig as loadConfigKernel,
-  saveConfig,
+  setLanguageSetting as setLanguageSettingKernel,
+  toggleSidebarSetting as toggleSettingKernel,
 } from "../../kernel/config.js"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -42,25 +44,7 @@ export async function registerCommands(api: TuiPluginApi): Promise<void> {
   ])
 }
 
-/** v1 kv 的 KeyValueStore 折叠（设置逻辑经由内核，与 v2 行为一致） */
-function makeStore(api: TuiPluginApi) {
-  return {
-    get<T>(key: string, fallback: T): T {
-      try {
-        const v = api.kv?.get?.(key)
-        return (v === undefined || v === null ? fallback : v) as T
-      } catch {
-        return fallback
-      }
-    },
-    set<T>(key: string, value: T): void {
-      try {
-        api.kv?.set?.(key, value)
-      } catch { /* non-critical */ }
-    },
-  }
-}
-
+/** kv store 复用 adapter 的同一份折叠实现（避免两套 kv 语义漂移，审查 #13） */
 function loadConfigFromStore(api: TuiPluginApi): SidebarConfig {
   // v1 的 opencode.json 插件配置经 state.config 读取（与 sidebar 同源）
   let pluginConfig: Record<string, any> | undefined
@@ -97,10 +81,8 @@ function showHtmlReportRangeMenu(api: TuiPluginApi, dialog: TuiDialogStack): voi
           value: "today",
           onSelect: () => {
             dialog.clear()
-            const d = new Date()
-            const pad = (n: number) => String(n).padStart(2, "0")
-            const s = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-            showHtmlReport(api, { startDate: s, endDate: s }, "today")
+            const today = localDateStr(new Date())
+            showHtmlReport(api, { startDate: today, endDate: today }, "today")
           },
         },
         {
@@ -165,7 +147,8 @@ async function showJsonExport(api: TuiPluginApi): Promise<void> {
   try {
     const report = await getUsageReport({})
     const dir = ensureReportDir()
-    const dateStr = new Date().toISOString().slice(0, 10)
+    // 本地日期命名：toISOString 按 UTC，晚间导出会落错"今天"
+    const dateStr = localDateStr(new Date())
     const filePath = join(dir, `tokenwatch-${dateStr}.json`)
     writeFileSync(filePath, JSON.stringify(report, null, 2), "utf-8")
     api.ui.toast?.({ message: `JSON: ${filePath}`, variant: "info" })
@@ -180,7 +163,7 @@ async function showTextReport(api: TuiPluginApi): Promise<void> {
     const report = await getUsageReport({})
     const formatted = formatUsageReport(report)
     const dir = ensureReportDir()
-    const dateStr = new Date().toISOString().slice(0, 10)
+    const dateStr = localDateStr(new Date())
     const filePath = join(dir, `tokenwatch-${dateStr}.md`)
     writeFileSync(filePath, formatted, "utf-8")
     api.ui.toast?.({ message: `Report saved to ${filePath}`, variant: "info" })
@@ -281,17 +264,12 @@ function showLanguageMenu(api: TuiPluginApi, dialog: TuiDialogStack): void {
   ))
 }
 
+/** 设置动作复用 kernel/config 的单一实现（其 saveConfig 内部已 bumpVersion） */
 function setLanguageSetting(api: TuiPluginApi, lang: SupportedLanguage | "auto"): void {
-  const store = makeStore(api)
-  saveConfig(store, { ...loadConfigFromStore(api), language: lang })
-  bumpVersion(store)
+  setLanguageSettingKernel(makeStore(api), lang)
   setLanguage(lang)
 }
 
 function toggleSidebarSetting(api: TuiPluginApi, key: SidebarToggleKey): void {
-  const store = makeStore(api)
-  const current = loadConfigFromStore(api)
-  current.sidebar[key] = !current.sidebar[key]
-  saveConfig(store, current)
-  bumpVersion(store)
+  toggleSettingKernel(makeStore(api), key)
 }

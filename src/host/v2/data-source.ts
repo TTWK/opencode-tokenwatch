@@ -20,6 +20,7 @@ import type {
   UsageFilters,
   UsageReport,
 } from "../../kernel/format.js"
+import { t } from "../../kernel/i18n.js"
 
 interface MutableSession {
   sessionId: string
@@ -50,6 +51,8 @@ interface Snapshot {
 let cache: Snapshot | null = null
 /** 正在进行的扫描，防止并发重复触发 */
 let inflight: Promise<Snapshot> | null = null
+/** 缓存构建后有新数据落库（session.idle），下次取数时应后台重建 */
+let dirty = false
 
 function dayOf(ts: number): string {
   // 本地时区日期（YYYY-MM-DD），与 v1 SQL 的 date(...,'localtime') 分桶口径一致；
@@ -78,22 +81,28 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/** 会话列表页上限（每页 500），超出即截断并提示 */
+const MAX_SESSION_PAGES = 64
+/** 单会话消息页上限（每页 200），超出即截断并提示 */
+const MAX_MESSAGE_PAGES = 400
+
 /**
  * 服务端全量会话列表（含 v1 时期历史）。
  *
  * 必须走 `client.session.list`：TUI 的 `data.session.list()` 只是客户端 store，
  * 仅包含本进程打开/同步过的会话 —— v1 历史会话从未被打开过，走它会完全漏掉。
  * 服务端按页返回（limit=500 仍有 cursor.next），需 cursor 翻页拉全。
+ * 返回 truncated=true 表示达到页上限仍有更多数据（已截断）。
  */
-async function listAllSessions(ctx: any): Promise<any[]> {
+async function listAllSessions(ctx: any): Promise<{ sessions: any[]; truncated: boolean }> {
   const api = ctx?.client
   if (typeof api?.session?.list !== "function") {
     // 旧宿主没有暴露 client API 时退回客户端 store（行为同旧版插件）
-    return ctx?.data?.session?.list?.() ?? []
+    return { sessions: ctx?.data?.session?.list?.() ?? [], truncated: false }
   }
   const out: any[] = []
   let cursor: string | undefined
-  for (let page = 0; page < 64; page++) {
+  for (let page = 0; page < MAX_SESSION_PAGES; page++) {
     // cursor 自带排序方向，不能与 order 同时传
     const input: Record<string, unknown> = cursor ? { cursor } : { limit: 500, order: "asc" }
     const resp = await api.session.list(input)
@@ -101,7 +110,7 @@ async function listAllSessions(ctx: any): Promise<any[]> {
     cursor = resp?.cursor?.next ?? undefined
     if (!cursor) break
   }
-  return out
+  return { sessions: out, truncated: cursor != null }
 }
 
 /**
@@ -109,17 +118,17 @@ async function listAllSessions(ctx: any): Promise<any[]> {
  * 长会话的历史消息必须翻页才能拿全。个别 v1 早期会话服务端解码失败
  * （HTTP 500），调用方需按会话容错跳过。
  */
-async function listAllMessages(ctx: any, sessionID: string): Promise<any[]> {
+async function listAllMessages(ctx: any, sessionID: string): Promise<{ messages: any[]; truncated: boolean }> {
   const api = ctx?.client
   if (typeof api?.message?.list !== "function") {
     try {
       await ctx?.data?.session?.message?.sync?.(sessionID)
     } catch { /* 离线/权限失败时退化为本地缓存 */ }
-    return ctx?.data?.session?.message?.list?.(sessionID) ?? []
+    return { messages: ctx?.data?.session?.message?.list?.(sessionID) ?? [], truncated: false }
   }
   const out: any[] = []
   let cursor: string | undefined
-  for (let page = 0; page < 400; page++) {
+  for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
     const resp = await (cursor
       ? api.message.list({ sessionID, cursor })
       : api.message.list({ sessionID, limit: 200, order: "desc" }))
@@ -127,7 +136,7 @@ async function listAllMessages(ctx: any, sessionID: string): Promise<any[]> {
     cursor = resp?.cursor?.next ?? undefined
     if (!cursor) break
   }
-  return out
+  return { messages: out, truncated: cursor != null }
 }
 
 function isAssistantMessage(message: any): boolean {
@@ -148,24 +157,25 @@ async function scan(ctx: any): Promise<Snapshot> {
   let successCount = 0
   let failedCount = 0
 
-  const sessions = await listAllSessions(ctx)
+  const { sessions, truncated: sessionsTruncated } = await listAllSessions(ctx)
   let skippedSessions = 0
+  let truncatedMessageSessions = 0
 
   for (const session of sessions) {
     const sessionID = session?.id
     if (!sessionID) continue
-    if (filters_skipSession(sessionID, ctx)) continue
 
     let messages: any[]
     try {
       // 服务端全量消息；个别 v1 早期会话解码失败（500），跳过不计入
-      messages = await listAllMessages(ctx, sessionID)
+      const result = await listAllMessages(ctx, sessionID)
+      messages = result.messages
+      if (result.truncated) truncatedMessageSessions++
     } catch {
       skippedSessions++
       continue
     }
     let sawAssistant = false
-    let lastDay = dayOf(session?.time?.created ?? Date.now())
 
     for (const message of messages) {
       if (!isAssistantMessage(message)) continue
@@ -182,7 +192,6 @@ async function scan(ctx: any): Promise<Snapshot> {
       const provider = message?.model?.providerID ?? "unknown"
       const model = message?.model?.id ?? "unknown"
       const day = dayOf(message?.time?.created ?? session?.time?.created ?? Date.now())
-      lastDay = day
 
       // v2 用 finish === "error" 判定失败，比 v1 的 tokens.total === 0 启发式更准确
       const isFailure = message?.finish === "error" || total === 0
@@ -290,14 +299,26 @@ async function scan(ctx: any): Promise<Snapshot> {
       // 没有 assistant 消息的会话不进入 sessions 列表，避免空行
       sessionAgg.delete(sessionID)
     }
-    void lastDay
 
     await yieldToEventLoop()
   }
 
+  // 截断/跳过不再只写 console（TUI 里不可见），经宿主 toast 提示用户数据可能有缺口
+  const warn = (message: string): void => {
+    try {
+      ctx?.ui?.toast?.show({ message, variant: "warning" })
+    } catch {
+      console.warn(`[tokenwatch] ${message}`)
+    }
+  }
   if (skippedSessions > 0) {
-    // 个别 v1 早期会话在服务端解码失败（HTTP 500），已跳过；留痕便于排查数据缺口
-    console.warn(`[tokenwatch] skipped ${skippedSessions} session(s) whose messages failed to load`)
+    warn(t("noticeSkippedSessions").replace("{n}", String(skippedSessions)))
+  }
+  if (sessionsTruncated) {
+    warn(t("noticeScanTruncatedSessions"))
+  }
+  if (truncatedMessageSessions > 0) {
+    warn(t("noticeScanTruncatedMessages").replace("{n}", String(truncatedMessageSessions)))
   }
 
   for (const [key, set] of modelSessions) {
@@ -322,17 +343,11 @@ async function scan(ctx: any): Promise<Snapshot> {
     errors: {
       successCount,
       failedCount,
-      errorRate: successCount + failedCount > 0 ? (failedCount / (successCount + failedCount)) * 100 : 0,
+      // 小数口径（0~1），与 v1 的 getErrorStats 及 HTML 报告的消费方一致
+      errorRate: successCount + failedCount > 0 ? failedCount / (successCount + failedCount) : 0,
       byModel: Array.from(errorByModel.values()),
     },
   }
-}
-
-/** v2 无 SQL WHERE，会话级过滤在此处完成 */
-function filters_skipSession(sessionID: string, ctx: any): boolean {
-  void sessionID
-  void ctx
-  return false
 }
 
 function summarize(input: {
@@ -365,29 +380,33 @@ function summarize(input: {
 }
 
 /**
- * 取用量报告。
+ * 启动一次全量扫描。
  *
- * `onFirstRun` 由命令层传入：首次冷启动前向用户说明将要发生的全量扫描，
- * 避免 TUI 在毫无提示的情况下卡住数秒。
+ * 独立成函数是因为"后台重建"路径不 await 结果：挂一个空 catch
+ * 防止 unhandled rejection，真正的错误仍由冷启动路径的调用方处理。
  */
-export async function getUsageReport(ctx: any, filters: UsageFilters = {}): Promise<UsageReport> {
-  if (!cache && !inflight) {
-    inflight = scan(ctx).then((snapshot) => {
+function startScan(ctx: any): Promise<Snapshot> {
+  const p = scan(ctx)
+    .then((snapshot) => {
       cache = snapshot
       inflight = null
       return snapshot
-    }).catch((err) => {
+    })
+    .catch((err) => {
       inflight = null
       throw err
     })
-  }
-  const snapshot = await (inflight ?? Promise.resolve(cache!))
+  p.catch(() => { /* 后台重建路径不 await，吞掉拒绝避免未处理告警 */ })
+  inflight = p
+  return p
+}
 
+function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
   const sessions = snapshot.sessions.filter(
     (s) => matchesDay(s.day, filters) && matchesModel(s.provider, s.model, filters),
   )
-  const sessionIds = new Set(sessions.map((s) => s.sessionId))
-
+  // 注意：session 级 model/provider 过滤用的是该会话"首个非 unknown"的主模型，
+  // 多模型会话无法按单个模型精确切分 —— 与 v1 SQL 的逐消息过滤语义近似但不完全等价
   const models = snapshot.models.filter((m) => matchesModel(m.provider, m.model, filters))
   const providers = snapshot.providers.filter((p) => !filters.provider || p.provider === filters.provider)
   const daily = snapshot.daily.filter((d) => matchesDay(d.day, filters))
@@ -416,9 +435,34 @@ export async function getUsageReport(ctx: any, filters: UsageFilters = {}): Prom
   }
 }
 
-/** 供命令层在会话切换/数据变更后主动失效缓存 */
-export function invalidateUsageCache(): void {
-  cache = null
+/**
+ * 取用量报告（stale-while-revalidate）。
+ *
+ * - 冷启动（无缓存）：等待全量扫描完成（调用方已先提示用户）。
+ * - 缓存可用且数据有更新（markUsageCacheDirty）：立即返回旧快照，
+ *   同时后台重建 —— 本次报告不卡顿，下次打开即为新数据。
+ * - 缓存可用且无更新：直接返回。
+ */
+export async function getUsageReport(ctx: any, filters: UsageFilters = {}): Promise<UsageReport> {
+  if (!inflight) {
+    if (!cache) {
+      startScan(ctx)
+    } else if (dirty) {
+      dirty = false
+      startScan(ctx)
+    }
+  }
+
+  if (!cache) {
+    const snapshot = await inflight!
+    return buildReport(snapshot, filters)
+  }
+  return buildReport(cache, filters)
+}
+
+/** 有新数据落库（如 session.idle）时由适配层调用：下次取数触发后台重建 */
+export function markUsageCacheDirty(): void {
+  dirty = true
 }
 
 /** 供命令层判断本次调用是否会触发冷启动扫描 */

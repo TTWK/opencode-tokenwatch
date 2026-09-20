@@ -1,16 +1,25 @@
 import type { CombinedReportData, ModelBreakdownItem } from "./format.js"
+import { formatTokens, formatCost } from "./format.js"
 
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B"
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M"
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K"
-  return String(n)
+/**
+ * JSON 嵌入 <script> 前的安全序列化。
+ *
+ * JSON.stringify 不转义 `/`，形如 `</script>` 的字符串（会话标题是模型生成
+ * 内容，完全可能出现）会提前终止 script 块并注入任意标记。把 `<` 统一转义
+ * 为 `\u003c` 后，JSON.parse 与 JS 字面量语义不变，但不再能闭合标签。
+ */
+function jsonLit(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c")
 }
 
-function fmtCost(n: number): string {
-  if (n === 0) return "$0.00"
-  if (n < 0.01) return "$" + n.toFixed(6)
-  return "$" + n.toFixed(2)
+/** HTML 文本插值转义（模型名 / 供应商名等外部内容进入 HTML 时必须经过） */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
 }
 
 function fmtPercent(n: number): string {
@@ -57,7 +66,7 @@ function renderKpiCards(data: CombinedReportData): string {
     <div class="kpi-row">
       <div class="kpi-card">
         <div class="kpi-label">Total Tokens</div>
-        <div class="kpi-value">${fmtTokens(s.totalTokens)}</div>
+        <div class="kpi-value">${formatTokens(s.totalTokens)}</div>
       </div>
       <div class="kpi-card${isHighCache ? ' kpi-glow' : ''}">
         <div class="kpi-label">Cache Hit Rate</div>
@@ -73,7 +82,7 @@ function renderKpiCards(data: CombinedReportData): string {
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Total Cost</div>
-        <div class="kpi-value" style="color:var(--tps)">${fmtCost(s.totalCost)}</div>
+        <div class="kpi-value" style="color:var(--tps)">${formatCost(s.totalCost)}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Error Rate</div>
@@ -93,11 +102,11 @@ function renderModelChartInit(data: CombinedReportData): string {
     return perf?.avgTPS ?? null
   })
 
-  return `var modelNames = ${JSON.stringify(names)};
-var modelInput = ${JSON.stringify(inputData)};
-var modelOutput = ${JSON.stringify(outputData)};
-var modelCache = ${JSON.stringify(cacheData)};
-var modelTps = ${JSON.stringify(tpsData)};
+  return `var modelNames = ${jsonLit(names)};
+var modelInput = ${jsonLit(inputData)};
+var modelOutput = ${jsonLit(outputData)};
+var modelCache = ${jsonLit(cacheData)};
+var modelTps = ${jsonLit(tpsData)};
 
 function initModelChart() {
   var el = document.getElementById('model-chart');
@@ -256,12 +265,12 @@ function renderScatterChartInit(data: CombinedReportData): string {
   const reqCounts = sorted.map(p => p.requestCount)
 
   return `
-var effNames = ${JSON.stringify(names)};
-var effTps   = ${JSON.stringify(tpsValues)};
-var effTtft  = ${JSON.stringify(ttftValues)};
-var effCost  = ${JSON.stringify(costValues)};
-var effHit   = ${JSON.stringify(hitRates)};
-var effReq   = ${JSON.stringify(reqCounts)};
+var effNames = ${jsonLit(names)};
+var effTps   = ${jsonLit(tpsValues)};
+var effTtft  = ${jsonLit(ttftValues)};
+var effCost  = ${jsonLit(costValues)};
+var effHit   = ${jsonLit(hitRates)};
+var effReq   = ${jsonLit(reqCounts)};
 
 function initScatterChart() {
   var el = document.getElementById('scatter-chart');
@@ -379,9 +388,9 @@ function renderProviderCards(data: CombinedReportData): string {
 
     return `
     <div class="provider-card" style="border-color:${providerBorderColor(p.provider)}">
-      <div class="provider-name">${p.provider}</div>
-      <div class="provider-stat"><span class="stat-label">Tokens</span><span>${fmtTokens(p.totalTokens)}</span></div>
-      <div class="provider-stat"><span class="stat-label">Cost</span><span>${fmtCost(p.totalCost)}</span></div>
+      <div class="provider-name">${escapeHtml(p.provider)}</div>
+      <div class="provider-stat"><span class="stat-label">Tokens</span><span>${formatTokens(p.totalTokens)}</span></div>
+      <div class="provider-stat"><span class="stat-label">Cost</span><span>${formatCost(p.totalCost)}</span></div>
       <div class="provider-stat"><span class="stat-label">Avg TTFT</span><span>${avgTtft != null ? avgTtft.toFixed(0) + 'ms' : '—'}</span></div>
       <div class="provider-stat"><span class="stat-label">Avg TPS</span><span>${avgTps != null ? avgTps.toFixed(1) : '—'}</span></div>
       <div class="provider-stat"><span class="stat-label">Models</span><span>${modelCount}</span></div>
@@ -411,18 +420,18 @@ function renderModelAnalyticsSection(data: CombinedReportData): string {
     const p95ttft = perf?.p95TTFT != null ? perf.p95TTFT.toFixed(0) + 'ms' : '—'
     const tps = perf?.avgTPS != null ? perf.avgTPS.toFixed(1) : '—'
     return `<tr>
-      <td>${m.model}</td>
-      <td>${m.provider}</td>
+      <td>${escapeHtml(m.model)}</td>
+      <td>${escapeHtml(m.provider)}</td>
       <td>${m.requests}</td>
-      <td>${fmtTokens(m.totalTokens)}</td>
-      <td>${fmtTokens(m.inputTokens)}</td>
-      <td>${fmtTokens(m.outputTokens)}</td>
-      <td>${fmtTokens(m.cacheRead)}</td>
+      <td>${formatTokens(m.totalTokens)}</td>
+      <td>${formatTokens(m.inputTokens)}</td>
+      <td>${formatTokens(m.outputTokens)}</td>
+      <td>${formatTokens(m.cacheRead)}</td>
       <td style="color:${hitColor};font-weight:600">${fmtPercent(hitRate)}</td>
       <td>${ttft}</td>
       <td style="color:var(--tps);font-size:0.85em">${p95ttft}</td>
       <td>${tps}</td>
-      <td>${fmtCost(m.totalCost)}</td>
+      <td>${formatCost(m.totalCost)}</td>
     </tr>`
   }).join("\n")
 
@@ -436,7 +445,7 @@ function renderModelAnalyticsSection(data: CombinedReportData): string {
     const hitColor = p.cacheHitRate != null && p.cacheHitRate >= 85 ? 'var(--cache)'
       : p.cacheHitRate != null && p.cacheHitRate >= 70 ? 'var(--tps)' : 'var(--output)'
     return `<tr>
-      <td>${p.model}</td>
+      <td>${escapeHtml(p.model)}</td>
       <td>${p.requestCount}</td>
       <td>${fmtMs(p.avgTTFT)}</td>
       <td>${fmtMs(p.p50TTFT)}</td>
@@ -468,8 +477,8 @@ function renderModelAnalyticsSection(data: CombinedReportData): string {
       .map(m => {
         const modelRate = m.total > 0 ? (m.failed / m.total * 100).toFixed(1) + '%' : '—'
         return `<tr>
-          <td>${m.provider}</td>
-          <td>${m.model}</td>
+          <td>${escapeHtml(m.provider)}</td>
+          <td>${escapeHtml(m.model)}</td>
           <td>${m.total}</td>
           <td style="color:var(--output)">${m.failed}</td>
           <td style="color:var(--tps)">${m.total - m.failed}</td>
@@ -556,9 +565,9 @@ function renderDailyTrendInit(data: CombinedReportData): string {
   const costs = data.daily.slice().reverse().map(d => d.totalCost)
 
   return `
-var dailyDays = ${JSON.stringify(days)};
-var dailyTokens = ${JSON.stringify(tokens)};
-var dailyCosts = ${JSON.stringify(costs)};
+var dailyDays = ${jsonLit(days)};
+var dailyTokens = ${jsonLit(tokens)};
+var dailyCosts = ${jsonLit(costs)};
 
 function initDailyChart() {
   var el = document.getElementById('daily-chart');
@@ -647,7 +656,7 @@ function renderHeatmapInit(data: CombinedReportData): string {
   const maxDate = days.length > 0 ? days[days.length - 1].day : ''
 
   return `
-var heatData = ${JSON.stringify(heatData)};
+var heatData = ${jsonLit(heatData)};
 
 function initHeatmapChart() {
   var el = document.getElementById('heatmap-chart');
@@ -679,7 +688,7 @@ function initHeatmapChart() {
       right: 30,
       top: 20,
       bottom: 60,
-      range: ['${minDate}', '${maxDate}'],
+      range: ['${escapeHtml(minDate)}', '${escapeHtml(maxDate)}'],
       splitLine: { lineStyle: { color: '#2A2A35' } },
       dayLabel: { color: '#B0B0C0' },
       monthLabel: { color: '#B0B0C0' },
@@ -711,7 +720,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
     p.requestCount > 0 &&
     (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
   )
-  const jsonData = JSON.stringify(data)
+  const jsonData = jsonLit(data)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -912,6 +921,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
 
   <div class="section">
     <div class="section-title">Usage Timeline</div>
+    ${data.dailyTruncated ? '<div class="provider-more">⚠️ 日期明细超出数据源上限已被截断，本图表仅覆盖其中最近的日期；汇总数字（KPI/表格）不受影响。</div>' : ''}
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="daily" onclick="switchTab('daily')">Daily Trend</button>
       <button class="tab-btn" data-tab="heatmap" onclick="switchTab('heatmap')">Heatmap</button>

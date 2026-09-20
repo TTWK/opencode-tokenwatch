@@ -14,6 +14,7 @@ import {
   buildCombinedData,
   ensureReportDir,
   getRangeSlug,
+  localDateStr,
   openInBrowser,
   writeHtmlReport,
 } from "../kernel/report.js"
@@ -110,10 +111,11 @@ export interface RangePreset {
 
 export function rangePresets(): RangePreset[] {
   const today = stamp()
+  // 本地日期（勿用 toISOString：UTC 会在非 UTC 时区的早晚 8 小时错位一天）
   const daysAgo = (n: number) => {
     const d = new Date()
     d.setDate(d.getDate() - n)
-    return d.toISOString().slice(0, 10)
+    return localDateStr(d)
   }
   return [
     { id: "all", label: t("menuAll"), tag: "all", filters: {} },

@@ -9,7 +9,7 @@
  * - 命令：`command.register` → `keymap.layer`
  * - 消息 part：需二次查询 → 消息内直接内嵌 `content`
  */
-import { getUsageReport, isUsageCacheCold } from "./data-source.js"
+import { getUsageReport, isUsageCacheCold, markUsageCacheDirty } from "./data-source.js"
 import type {
   HostAdapter,
   HostEventHandlers,
@@ -103,6 +103,11 @@ function makeStore(ctx: V2Context, dispose: Set<() => void>): KeyValueStore {
       // mutate 是异步的，但调用方不需要等待落盘；失败不应影响 UI
       void mutate((draft) => {
         draft.values[key] = value
+      }).catch(() => {})
+    },
+    delete(key) {
+      void mutate((draft) => {
+        delete (draft.values as Record<string, unknown>)[key]
       }).catch(() => {})
     },
   }
@@ -299,6 +304,9 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
       )
       off.push(
         ctx.data.on("session.idle", () => {
+          // 空闲 = 一步请求已落库：标记用量缓存脏，下次 /usage 后台重建
+          // （stale-while-revalidate，避免报告数据停留在首次扫描时刻）
+          markUsageCacheDirty()
           handlers.onInvalidate()
         }),
       )

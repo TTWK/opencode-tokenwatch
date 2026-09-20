@@ -27,7 +27,8 @@ const sqlDataSource: UsageDataSource = {
   getUsageReport: (filters) => getUsageReport(filters),
 }
 
-function makeStore(api: TuiPluginApi): KeyValueStore {
+/** v1 kv 的 KeyValueStore 折叠（v1/commands.tsx 复用同一份，避免两套实现漂移） */
+export function makeStore(api: TuiPluginApi): KeyValueStore {
   return {
     get(key, fallback) {
       try {
@@ -41,6 +42,10 @@ function makeStore(api: TuiPluginApi): KeyValueStore {
       try {
         api.kv?.set?.(key, value)
       } catch { /* non-critical */ }
+    },
+    delete(key) {
+      // 旧版宿主 kv 可能没有 delete：淘汰策略在此类宿主上优雅降级（仅索引封顶）
+      try { (api.kv as any)?.delete?.(key) } catch { /* non-critical */ }
     },
   }
 }
@@ -141,24 +146,9 @@ export function createV1Adapter(api: TuiPluginApi): HostAdapter {
       return () => {}
     },
 
-    registerCommands(specs) {
-      const register = (api as any).command?.register
-      if (typeof register !== "function") return () => {}
-      const unregister = register(() =>
-        specs.map((spec) => ({
-          value: spec.id,
-          title: spec.title,
-          description: spec.description,
-          category: spec.category ?? "Stats",
-          slash: spec.slash ? { name: spec.slash } : undefined,
-          onSelect: async (dialog: any) => {
-            if (dialog) await spec.run()
-            else await spec.run()
-          },
-        })),
-      )
-      return typeof unregister === "function" ? unregister : () => {}
-    },
+    // registerCommands 不在此实现（审查 #13）：v1 的命令经由 host/v1/commands.tsx
+    // 用原生 DialogSelect 实现（UX 优于通用 select），HostAdapter.registerCommands
+    // 在 v1 下不可达，契约中已改为可选 —— 详见 docs/CODE-REVIEW-2026-09-13.md
 
     notify(message: string, variant: NotifyVariant = "info") {
       try {

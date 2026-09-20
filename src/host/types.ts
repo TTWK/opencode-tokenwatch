@@ -72,6 +72,8 @@ export interface SidebarInput {
 export interface KeyValueStore {
   get<T>(key: string, fallback: T): T
   set<T>(key: string, value: T): void
+  /** 删除条目；v1 宿主可能不提供（调用方需判空），用于会话消息 KV 的淘汰 */
+  delete?(key: string): void
 }
 
 export interface CommandSpec {
@@ -128,8 +130,11 @@ export interface HostAdapter {
   /** 挂载侧边栏 UI，返回卸载函数 */
   registerSidebar(render: (input: SidebarInput) => JSX.Element): () => void
 
-  /** 注册命令，返回注销函数 */
-  registerCommands(specs: readonly CommandSpec[]): () => void
+  /**
+   * 注册命令，返回注销函数。
+   * v1 经由 host/v1/commands.tsx 用原生 DialogSelect 实现菜单，不走此方法。
+   */
+  registerCommands?(specs: readonly CommandSpec[]): () => void
 
   notify(message: string, variant?: NotifyVariant): void
   alert(input: { title: string; message: string }): Promise<void>

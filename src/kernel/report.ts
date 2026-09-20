@@ -6,32 +6,16 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { execSync } from "node:child_process"
-import type { LogEntry, ModelPerfStats } from "./format.js"
-import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
+import { spawn } from "node:child_process"
 import type { CombinedReportData, HtmlReportMeta, UsageFilters, UsageReport } from "./format.js"
 import { generateUsageHtml } from "./report-html.js"
 import { readPersistedStats } from "./store.js"
 import { readLogs } from "./perf.js"
 
-/**
- * 从 JSONL 日志聚合性能统计。
- *
- * 分母使用各自独立的样本计数（ttftCount/tpsCount/latencyCount），
- * 而非 requestCount —— 缺失指标的请求不能拉低平均值。
- * 全零 token 条目（失败/未完成请求）被跳过。
- */
-export function aggregatePerfStats(logs: LogEntry[]): ModelPerfStats[] {
-  const map = new Map<string, ModelAccumulator>()
-  for (const entry of logs) {
-    let acc = map.get(entry.model)
-    if (!acc) {
-      acc = createAccumulator(entry.model, entry.providerID)
-      map.set(entry.model, acc)
-    }
-    accumulateEntry(acc, entry)
-  }
-  return Array.from(map.values()).map(finalizeAccumulator)
+/** 本地时区 YYYY-MM-DD（toISOString 按 UTC，跨时区会偏一天）—— 全项目统一日期出口 */
+export function localDateStr(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 /** 报告输出目录（~/.opencode/reports） */
@@ -41,13 +25,24 @@ export function ensureReportDir(): string {
   return dir
 }
 
-/** 用系统默认程序打开文件（多平台，失败静默） */
+/** 用系统默认程序打开文件（多平台，失败静默；spawn detached 不阻塞 TUI） */
 export function openInBrowser(filePath: string): void {
   try {
     const platform = process.platform
-    if (platform === "win32") execSync(`start "" "${filePath}"`, { windowsHide: true, timeout: 5000 })
-    else if (platform === "darwin") execSync(`open "${filePath}"`, { timeout: 5000 })
-    else execSync(`xdg-open "${filePath}"`, { timeout: 5000 })
+    let child
+    if (platform === "win32") {
+      // start 是 cmd 内建命令，须经 cmd.exe 调起
+      child = spawn("cmd.exe", ["/d", "/s", "/c", "start", "", filePath], {
+        detached: true, stdio: "ignore", windowsHide: true,
+      })
+    } else if (platform === "darwin") {
+      child = spawn("open", [filePath], { detached: true, stdio: "ignore" })
+    } else {
+      child = spawn("xdg-open", [filePath], { detached: true, stdio: "ignore" })
+    }
+    // detached + unref：浏览器启动失败/挂起都不影响 TUI（错误事件静默吞掉）
+    child.once("error", () => { })
+    child.unref()
   } catch { /* silently fail */ }
 }
 
@@ -86,12 +81,6 @@ export function generateUniqueReportPath(dir: string, rangeSlug: string): string
     counter++
   }
   return targetPath
-}
-
-/** 本地时区 YYYY-MM-DD（toISOString 按 UTC，跨时区会偏一天） */
-function localDateStr(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 function nowStamp(): string {

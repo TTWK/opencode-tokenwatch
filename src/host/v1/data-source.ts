@@ -44,6 +44,8 @@ function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     exec(cmd, { windowsHide: true, timeout: 30000, env: OPENCODE_ENV }, (error, stdout, stderr) => {
       if (error) reject(Object.assign(error, { stderr }))
+      // stderr 仅在没有任何 stdout 时才视为失败：CLI 会把无害警告写到 stderr
+      else if (stderr.trim() && !stdout.trim()) reject(Object.assign(new Error(stderr.trim()), { stderr }))
       else resolve({ stdout, stderr })
     })
   })
@@ -126,8 +128,16 @@ async function queryDb<T>(sql: string): Promise<T[]> {
   return Array.isArray(parsed) ? parsed : parsed.data ?? []
 }
 
+/**
+ * SQL 字面量转义 + shell 元字符清洗。
+ *
+ * 单引号翻倍是 SQLite 字面量转义；`"`、`%`、换行等会被整条命令最外层的
+ * cmd/JSON 引号层激活（`"` 提前闭合 shell 引号使后续内容脱离引号、`%`
+ * 触发 cmd 变量展开），这些字符在 provider/model/sessionID 等标识符中
+ * 本就不合法，直接剔除即可闭合注入面。
+ */
 function escapeSql(value: string): string {
-  return value.replace(/'/g, "''")
+  return value.replace(/'/g, "''").replace(/["%\r\n\0]/g, "")
 }
 
 /** 校验日期格式必须为 YYYY-MM-DD，防止格式异常字符串进入 SQL */
@@ -288,7 +298,9 @@ ORDER BY total_tokens DESC
 }
 
 export async function getDailyBreakdown(filters: UsageFilters = {}): Promise<DailyBreakdownItem[]> {
-  const limit = filters.limit ?? 30
+  // 默认上限 365 天：带日期过滤的查询本就被范围约束；"全部时间"报告的时间线
+  // 若只画 30 天会与 KPI/汇总口径不一致（审查 #11）。截断时置 dailyTruncated 提示。
+  const limit = filters.limit ?? 365
   const sql = `
 SELECT
   date(m.time_created / 1000, 'unixepoch', 'localtime') as day,
@@ -419,6 +431,7 @@ ORDER BY failed DESC
 }
 
 export async function getUsageReport(filters: UsageFilters = {}): Promise<UsageReport> {
+  const dailyLimit = filters.limit ?? 365
   const [summary, models, providers, daily, sessions, errors] = await Promise.all([
     getSummary(filters),
     getModelBreakdown(filters),
@@ -428,5 +441,15 @@ export async function getUsageReport(filters: UsageFilters = {}): Promise<UsageR
     getErrorStats(filters),
   ])
 
-  return { filters, summary, models, providers, daily, sessions, errors }
+  return {
+    filters,
+    summary,
+    models,
+    providers,
+    daily,
+    sessions,
+    errors,
+    // 恰好等于上限视为可能截断（无法从数据本身区分"正好 365 天"）
+    dailyTruncated: daily.length >= dailyLimit,
+  }
 }

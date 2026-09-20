@@ -238,8 +238,9 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const [partVersion, setPartVersion] = createSignal(0)
 
   const perfStats = createMemo(() => {
+    // 只依赖 allTokenMessages（消息完成时更新）。不再直接依赖 partVersion：
+    // 流式 delta 高频到达时，避免每次都对每个模型做 reservoir 拷贝+排序
     void props.allTokenMessages()
-    void partVersion()
     return perfTracker.getSessionStats()
   })
 
@@ -328,8 +329,32 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   }
 
   onMount(() => {
-    const unsubPart = host.onPartUpdated(() => setPartVersion(v => v + 1))
-    onCleanup(() => { try { unsubPart?.() } catch { } })
+    // part 更新在流式期间每秒可达数十次（v2 的每个 content delta 都算）：
+    // partVersion 节流到 ~2Hz，tokenDistribution/perfStats 的全量重算
+    // 不再随每个 delta 触发，长会话不再拖慢 TUI
+    let lastBump = 0
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null
+    const bump = () => {
+      lastBump = Date.now()
+      setPartVersion((v) => v + 1)
+    }
+    const unsubPart = host.onPartUpdated(() => {
+      const elapsed = Date.now() - lastBump
+      if (elapsed >= 500) {
+        bump()
+        return
+      }
+      if (!pendingTimer) {
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null
+          bump()
+        }, 500 - elapsed)
+      }
+    })
+    onCleanup(() => {
+      if (pendingTimer) clearTimeout(pendingTimer)
+      try { unsubPart?.() } catch { }
+    })
   })
 
   // ── 宽度派生值 ──
