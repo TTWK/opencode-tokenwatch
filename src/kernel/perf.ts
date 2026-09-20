@@ -258,20 +258,24 @@ class PerfTracker {
     if (!sessionID) return
 
     try {
-      if (!existsSync(LOG_PATH)) return
-      const content = await readFile(LOG_PATH, "utf-8")
-      if (token !== this.loadToken) return // 期间又切换了会话，丢弃过期加载
-      const trimmed = content.trim()
-      if (!trimmed) return
-      for (const line of trimmed.split("\n")) {
-        if (!line) continue
-        try {
-          const entry = JSON.parse(line) as LogEntry
-          if (entry.sessionID === sessionID) {
-            this.updateStats(entry.model, entry)
+      const files = [LOG_PATH_ROTATED, LOG_PATH].filter((f) => existsSync(f))
+      if (files.length === 0) return
+      for (const filePath of files) {
+        if (token !== this.loadToken) return // 期间又切换了会话，丢弃过期加载
+        const content = await readFile(filePath, "utf-8")
+        if (token !== this.loadToken) return
+        const trimmed = content.trim()
+        if (!trimmed) continue
+        for (const line of trimmed.split("\n")) {
+          if (!line) continue
+          try {
+            const entry = JSON.parse(line) as LogEntry
+            if (entry.sessionID === sessionID) {
+              this.updateStats(entry.model, entry)
+            }
+          } catch {
+            // Skip malformed lines
           }
-        } catch {
-          // Skip malformed lines
         }
       }
     } catch {

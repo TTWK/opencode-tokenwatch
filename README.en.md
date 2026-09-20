@@ -10,7 +10,7 @@ A terminal monitoring plugin for OpenCode CLI that displays real-time token usag
 
 ## Key Features
 
-- **Real-time Sidebar Dashboard**: Check input/output tokens, estimated cost, cache hit rate, time to first token, and generation speed per model during sessions.
+- **Real-time Sidebar Dashboard**: Check input/output tokens, estimated cost, cache hit rate, and average TTFT & generation speed per model during sessions.
 - **Cache Hit Rate & Trends**: Track cache efficiency per model, with arrows showing whether the hit rate for recent requests is trending up or down.
 - **Token Breakdown**: Automatically breaks down tokens into system prompt, user input, tool execution, and assistant output to identify major context consumers.
 - **Interactive Usage Reports**: Type `/usage` in the terminal to launch an ECharts interactive dashboard in your browser with historical trends, cross-model comparisons, and failed request stats; export to JSON or Markdown with one click.

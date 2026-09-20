@@ -98,6 +98,7 @@ const SESSION_INDEX_KEY = "tokenwatch-session-index"
 export function startTokenWatch(host: HostAdapter): () => void {
   const perfTracker = createPerfTracker()
   const [sidebarRevision, setSidebarRevision] = createSignal(0)
+  const [perfRevision, setPerfRevision] = createSignal(0)
   const [allTokenMessages, setAllTokenMessages] = createSignal<TokenMessage[]>([])
   let currentSessionID = ""
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -152,8 +153,11 @@ export function startTokenWatch(host: HostAdapter): () => void {
   const switchSession = (sessionID: string): void => {
     if (!sessionID || sessionID === currentSessionID) return
     currentSessionID = sessionID
-    // JSONL 重放是异步的（内部有过期令牌，快速切换不会串话）
-    void perfTracker.loadSession(sessionID)
+    // JSONL 重放是异步的（内部有过期令牌，快速切换不会串话），重放完成时通知 UI 刷新均值
+    void perfTracker.loadSession(sessionID).then(() => {
+      setPerfRevision((v) => v + 1)
+      setSidebarRevision((v) => v + 1)
+    }).catch(() => {})
     evictOldSessions(sessionID)
 
     if (pollTimer) {
@@ -201,6 +205,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
   const unsubscribe = host.subscribe({
     onMessageUpdated(event) {
       perfTracker.handleMessageUpdated(toPerfMessageEvent(event))
+      setPerfRevision((v) => v + 1)
 
       // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）。
       // 事件处理器是串行的，先读后写不与 updater 副作用混用，保持 setSignal 纯净。
@@ -252,6 +257,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
       <TokenWatchPanel
         host={host}
         perfTracker={perfTracker}
+        perfRevision={perfRevision}
         messages={() => {
           try {
             return host.sessionMessages(currentSessionID)

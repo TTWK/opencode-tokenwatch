@@ -106,6 +106,7 @@ interface ModelAgg {
 interface TokenWatchPanelProps {
   host: HostAdapter
   perfTracker: PerfTracker
+  perfRevision?: () => number
   messages: () => readonly any[]
   /** 绑定了当前会话的 part 查询（v2 下避免跨会话扫描） */
   messageParts: (messageID: string) => readonly any[]
@@ -238,8 +239,8 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
   const [partVersion, setPartVersion] = createSignal(0)
 
   const perfStats = createMemo(() => {
-    // 只依赖 allTokenMessages（消息完成时更新）。不再直接依赖 partVersion：
-    // 流式 delta 高频到达时，避免每次都对每个模型做 reservoir 拷贝+排序
+    // 建立响应式依赖：当会话异步重放完成或新请求到达时，重新计算模型均值
+    props.perfRevision?.()
     void props.allTokenMessages()
     return perfTracker.getSessionStats()
   })
@@ -603,12 +604,12 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                         : null}
                     </text>
 
-                    {/* 性能指标：显示最近一次请求（与宿主 footer 的单次口径可直接对照） */}
+                    {/* 性能指标：显示当前会话中该模型的均值（~TTFT 首字延迟与 ~TPS 生成速率） */}
                     <Show when={config().sidebar.showPerformance && !!perfStats().models[key]}>
                       <text fg={mutedColor()} marginTop={1}>
-                        {t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.lastTTFT ?? null)}</span>
-                        {"  "}{t("tps")} <span style={{ fg: primaryColor() } as any}>{perfStats().models[key]?.lastTPS?.toFixed(1) ?? "—"}</span>
-                        {"  "}{t("lat")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.lastLatency ?? null)}</span>
+                        ~{t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.avgTTFT ?? null)}</span>
+                        {"    "}
+                        ~{t("tps")} <span style={{ fg: primaryColor() } as any}>{perfStats().models[key]?.avgTPS?.toFixed(1) ?? "—"}</span>
                       </text>
                     </Show>
 
