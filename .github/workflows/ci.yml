@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build (tsc declarations + esbuild bundles)
+        run: npm run build
+
+      - name: Headless dual-host verification (v1 tui + v2 setup)
+        run: node scripts/verify-headless.mjs
+
+      - name: TPS/TTFT metric regression
+        run: node scripts/verify-tps.mjs
+
+  # e2e 需要真实 opencode 宿主（node-pty 驱动 TUI），仅手动触发
+  e2e:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci && npm run build
+      - working-directory: scripts/e2e
+        run: npm i
+      - run: node scripts/e2e/opencode2-e2e.js
+      - run: node scripts/e2e/opencode-v1-e2e.js

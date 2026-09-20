@@ -56,7 +56,8 @@ assert.ok(v1Events.has("message.updated"), "v1: message.updated subscribed")
 assert.ok(v1Events.has("message.part.updated"), "v1: message.part.updated subscribed")
 assert.ok(v1Events.has("message.removed"), "v1: message.removed subscribed")
 
-// 模拟一条 assistant 消息更新 → 应写入 kv 持久化
+// 模拟一条 assistant 消息更新 → 应写入 kv 持久化。
+// 注意：KV 写经 500ms 尾沿节流（审查 #6），需等待节流窗口后再断言。
 v1Events.get("message.updated")({
   properties: {
     info: {
@@ -68,8 +69,9 @@ v1Events.get("message.updated")({
     },
   },
 })
+await new Promise((r) => setTimeout(r, 700))
 const persisted = v1api.kv.get("tokenwatch-msgs-ses-1")
-assert.ok(Array.isArray(persisted) && persisted[0]?.inputTokens === 100, "v1: message persisted to kv")
+assert.ok(Array.isArray(persisted) && persisted[0]?.inputTokens === 100, "v1: message persisted to kv (after 500ms persist throttle)")
 console.log("v1 tui(): OK  (commands=%d, slots=%d, events=%d)",
   v1Registered.commands, v1Registered.slots.length, v1Events.size)
 
@@ -112,7 +114,15 @@ const v2ctx = {
     location: { agent: { list: () => [] } },
   },
   ui: {
-    slot(claim) { v2Registered.slots.push(claim); return () => {} },
+    slot(claim) {
+      v2Registered.slots.push(claim)
+      // 模拟宿主挂载：prompt.footer 载体插槽的 render 触发 keymap layer 安装。
+      // 真实宿主在 setup() 返回后才挂载插槽，故用微任务推迟，保证注册先于挂载。
+      if (claim.append === "prompt.footer") {
+        queueMicrotask(() => { try { claim.render?.() } catch { } })
+      }
+      return () => { }
+    },
     toast: { show: () => {} },
     dialog: {
       alert: async () => {},
@@ -135,8 +145,14 @@ const v2ctx = {
 
 const cleanup = plugin.setup(v2ctx)
 
-assert.ok(v2Registered.slots.length === 1, "v2: ui.slot registered")
-assert.equal(v2Registered.slots[0].append, "sidebar.content", "v2: slot target sidebar.content")
+// 等待载体插槽的挂载渲染（微任务）完成，再断言 layer 安装结果
+await new Promise((r) => setImmediate(r))
+
+assert.ok(v2Registered.slots.length === 2, "v2: ui.slot registered (panel + keymap vehicle)")
+const panelSlot = v2Registered.slots.find((s) => s.append === "sidebar.content")
+const vehicleSlot = v2Registered.slots.find((s) => s.append === "prompt.footer")
+assert.ok(panelSlot, "v2: slot target sidebar.content")
+assert.ok(vehicleSlot, "v2: prompt.footer vehicle slot (keymap mount carrier)")
 assert.ok(v2Registered.layer, "v2: keymap.layer installed")
 assert.equal(v2Registered.layer.mode, "global", "v2: layer mode global")
 const v2cmd = v2Registered.layer.commands[0]

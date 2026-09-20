@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-09-06（v0.6.0）
+> 最后更新：2026-09-13（v0.6.0 + 全项目代码审查修复，见 docs/CODE-REVIEW-2026-09-13.md）
 
 ---
 
@@ -23,10 +23,8 @@
 ```
 opencode-tokenwatch/
 ├── src/                        # 所有源码
-│   ├── server.ts               # Server 插件入口（空壳，导出 ./server）
-│   ├── tui.tsx                 # TUI 插件主模块，事件监听 & Slot 注册
-│   ├── tui.tsx                 # 分发入口：默认导出 { id, tui, setup }（见下方说明）
-│   ├── server.ts               # v1 Server 插件空壳 + 惰性 setup（包主入口兜底）
+│   ├── tui.tsx                 # TUI 分发入口：默认导出 { id, tui, setup }（见下方说明）
+│   ├── server.ts               # Server 插件入口（空壳 server + 惰性动态 import 的 setup）
 │   ├── kernel/                 # ★ 共享内核：零宿主依赖（无 opentui / 无 opencode 类型）
 │   │   ├── model.ts            #   归一化 TokenMessage + 命中率/有效性判定
 │   │   ├── format.ts           #   数据格式化 & 全部 TypeScript 类型定义
@@ -49,7 +47,8 @@ opencode-tokenwatch/
 │   └── ui/sidebar.tsx          # TokenWatchPanel 组件（仅依赖 HostAdapter）
 ├── dist/                       # 编译输出（发布到 npm）
 ├── docs/
-│   └── PROJECT-REVIEW.md       # 历史审查文档
+│   ├── CODE-REVIEW-2026-09-13.md  # 全项目代码审查报告（含修复跟踪）
+│   └── CODE-REVIEW-V2.md          # 历史审查文档
 ├── assets/                     # 静态资产
 ├── scripts/                    # 构建辅助脚本（publish-check.mjs）
 ├── build.tui.mjs               # esbuild 打包脚本（TSX -> JS，含 SolidJS JSX 预编译）
@@ -132,30 +131,19 @@ allTokenMessages[]  → ui/sidebar.tsx (SolidJS 响应式计算)
                         ├─ modelTrend()         近3次 vs 前3次命中率趋势
                         └─ tokenDistribution()  Token按角色分布（估算）
 
-kernel/perf.ts      → JSONL 日志（~/.opencode/tokenwatch.jsonl，可轮转）
-                    → kernel/store.ts（每次请求增量写入 tokenwatch-stats.json）
-                    → SessionPerfStats（内存中，session切换时reset）
+kernel/perf.ts      → JSONL 日志（~/.opencode/tokenwatch.jsonl，5MB rename 轮转 → .1）
+                    │   （KV 持久化带 500ms 写节流 + MRU 索引淘汰，保留最近 20 个会话）
+                    → kernel/store.ts（增量累积 tokenwatch-stats.json，
+                                    1s 合并落盘 + 原子写；首次读取时从 JSONL 全量迁移）
+                    → SessionPerfStats（内存中，session 切换时异步重放 JSONL 恢复）
 
-/usage 命令         → host/v1/data-source.ts（SQL）或 host/v2/data-source.ts（客户端遍历）
-                    → kernel/report.ts → HTML / JSON / Markdown
-```
-allTokenMessages[]  → sidebar.tsx (SolidJS 响应式计算)
-                        ├─ modelStats()         按模型聚合 Token/Cost
-                        ├─ sessionTotals()      全局总计
-                        ├─ modelHitRate()       缓存命中率 per model
-                        ├─ modelTrend()         近3次 vs 前3次命中率趋势
-                        └─ tokenDistribution()  Token按角色分布（估算）
+/usage 命令         → host/v1/data-source.ts（opencode db SQL）或
+                      host/v2/data-source.ts（client API cursor 翻页全量扫描，
+                                            脏标记 + stale-while-revalidate 缓存）
+                    → kernel/report.ts（装配 + 落盘）→ HTML / JSON / Markdown
+                    → kernel/report-html.ts（内嵌 ECharts 的独立 HTML，自动打开）
 
-perf-tracker.ts     → JSONL 日志（~/.opencode/tokenwatch.jsonl，可轮转）
-                    → stats-store.ts（每次请求增量写入 tokenwatch-stats.json）
-                    → SessionPerfStats（内存中，session切换时reset）
-
-stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不受日志轮转影响）
-                    → 首次读取时自动从 JSONL 全量迁移历史数据
-
-/usage 命令         → queries.ts → opencode db CLI → SQLite
-                    → stats-store.readPersistedStats() → 全量历史性能统计
-                    → HTML报告 / JSON导出 / 文本报告
+openInBrowser       → spawn detached（不阻塞 TUI）
 ```
 
 ---
@@ -184,12 +172,13 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 
 - 实现 `TuiPluginModule.tui` 接口
 - 维护 `allTokenMessages: Signal<TokenMessage[]>`（当前 session 全量消息）
-- **无效数据过滤**：`checkAndPopulate` 加 `tokens.total > 0` 检查，与事件处理器保持一致
-- **session 切换时**：从 KV Store 恢复历史消息，若无则从 `api.state.session.messages()` 重建
-- **数据持久化**：每次消息更新写入 KV Store（key = `tokenwatch-msgs-{sessionID}`）
-- 写入时使用事件中的 sessionID 替代 currentSlotSessionID，避免时序竞态问题
+- **无效数据过滤**：`rebuildFromMessages` 加五分量合计 > 0 检查，与事件处理器保持一致
+- **session 切换时**：从 KV Store 恢复历史消息，若无则轮询 `sessionMessages()` 重建
+- **数据持久化**：消息更新经 500ms 尾沿节流写入 KV（key = `tokenwatch-msgs-{sessionID}`），
+  并由 MRU 索引淘汰，仅保留最近 20 个会话的缓存
+- 写入时优先使用事件中的 sessionID，避免 slot 渲染时序导致的错存
 
-### `src/sidebar.tsx` — 侧边栏 UI
+### `src/ui/sidebar.tsx` — 侧边栏 UI
 
 - 基于 SolidJS 响应式系统，`createMemo` 懒计算
 - **模型排序**：按最近调用时间降序（最后一条消息的数组索引），而非 Token 总量或 TPS，切换模型时当前焦点模型始终在顶部
@@ -200,38 +189,56 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 - **趋势计算**：最近3次 vs 前3次的命中率差值，需至少6条消息
 - **成本展示**：`showPricing` 开启且 `totalCost > 0` 时显示（免费模型不显示，属正常行为）
 
-### `src/perf-tracker.ts` — 性能追踪
+### `src/kernel/perf.ts` — 性能追踪
 
-- **无效数据过滤**：`handleMessageUpdated` 跳过全零 token 请求，不写 JSONL / stats-store
-- **TTFT**：取最早**可见输出 part**（text/reasoning）的起始时间（`Math.min`）；
-  v2 的锚点来自 `session.reasoning.started` / `session.text.started` 事件
+- **无效数据过滤**：`handleMessageUpdated` 跳过全零 token 请求，不写 JSONL / stats
+- **TTFT**：取最早**可见输出锚点**（`Math.min`）——v1 为 text/reasoning/tool part 的
+  `time.start`，v2 为首个 `*-delta` 事件；step / part-open / step-start / step-finish
+  等"窗口锚点"只参与 TPS 窗口，不参与 TTFT
 - **TPS**：`outputTokens / genMs * 1000`；genMs = 流式终点 − 最早**任意** part 起点。
   v2 的流式终点优先 `time.streamed`（provider 响应体接收完），起点为
   `session.step.started` —— 与宿主官方 tok/s 口径 `output/(streamed−created)` 一致；
-  推理模型的 reasoning 阶段计入分母（此前只锚 text.started 导致 TPS 虚高数倍）
-- **TPS**：`outputTokens / genMs * 1000`（genMs = completed - firstPartTime），无可靠 genMs 时为 null
+  推理模型的 reasoning 阶段计入分母（此前只锚 text.started 导致 TPS 虚高数倍）；
+  无可靠 genMs 时为 null（不使用含排队时间的 fallback）
 - **平均值**：Welford 在线均值，分母使用独立的 `ttftCount` / `tpsCount` 计数器
-- 每条请求完成后同时调用 `stats-store.updatePersistedStats(entry)` 写入持久化统计
-- 会话内数据存内存，session 切换时 `reset()` 清空
+- 每条请求完成后调用 `store.updatePersistedStats(entry)` 写入持久化统计
+- 会话内数据存内存；session 切换时 `loadSession()` 异步重放 JSONL 恢复
+  （带 loadToken 过期令牌，快速切换不串话）
+- JSONL 5MB 时 rename 原子轮转到 `.1`（stats 迁移会一并读取）
 
-### `src/stats-store.ts` — 持久化聚合统计（v0.3.1 新增）
+### `src/kernel/perf-aggregate.ts` — 聚合核心（三处共用）
 
-- **存储路径**：`~/.opencode/tokenwatch-stats.json`
+- Welford 增量聚合 + Reservoir Sampling（每模型每指标最多 500 样本）+
+  线性插值分位数，被 perf（内存）、store（持久化）、report（临时聚合）共用
+- `cacheHitRate` 为**百分数**（×100）；`ErrorStats.errorRate` 为**小数**（0~1）
+
+### `src/kernel/store.ts` — 持久化聚合统计
+
+- **存储路径**：`~/.opencode/tokenwatch-stats.json`（临时文件 + rename 原子写）
 - **设计目标**：将聚合统计与原始日志完全解耦，JSONL 可以轮转，统计永不丢失
-- **增量写入**：每次请求完成时由 `perf-tracker` 调用 `updatePersistedStats()` 增量更新
-- **Reservoir Sampling**：每个模型保留最多 500 个 TTFT/latency 原始样本用于分位数计算，内存有界
-- **一次性迁移**：首次调用 `readPersistedStats()` 时自动读取全量 JSONL 重建历史，老用户无感升级
+- **合并落盘**：增量先累积在内存副本，至多每 1 秒一次同步写；进程 exit 钩子强制刷盘
+- **一次性迁移**：首次 `readPersistedStats()` 自动读取全量 JSONL（含 `.1`）重建历史
 - **防重复计数**：迁移时先清空 models 再重建，以 JSONL 为唯一权威来源
-- `readPersistedStats()` 供 `commands.tsx` 生成 HTML 报告时调用，替代了原来有窗口限制的 `aggregatePerfStats(readLogs(N))`
 
-### `src/queries.ts` — 数据库查询
+### `src/host/v1/data-source.ts` — SQL 数据源
 
 - 通过 `opencode db <SQL> --format json` CLI 子进程查询 SQLite
 - **过滤条件**：`role = 'assistant' AND tokens.total > 0`（过滤失败/空请求）
 - **totalTokens 字段**：直接取 `$.tokens.total`（OpenCode CLI 写入的字段）
-- **SQL 注入防护**：字符串参数调用 `escapeSql()`，日期参数使用正则格式校验
+- **注入防护**：`escapeSql()` 除单引号翻倍外，还剔除 `"`/`%`/换行等 shell
+  元字符闭合命令行注入面；日期参数经正则校验；stderr 仅在无 stdout 时判失败
+- **daily 上限**：默认 365 天，截断时 `dailyTruncated=true`（报告时间线区提示）
 
-### `src/generate-usage-html.ts` — HTML 报告
+### `src/host/v2/data-source.ts` — 客户端扫描数据源
+
+- client API cursor 翻页全量扫描（会话 ≤64 页×500，单会话消息 ≤400 页×200），
+  覆盖 v1 时期历史；截断/跳过经宿主 toast 警告
+- **缓存**：同一 TUI 进程复用；`session.idle` 置脏，取数走
+  stale-while-revalidate（旧快照立即返回 + 后台重建）
+- session 级 model/provider 过滤用会话"首个非 unknown"主模型，
+  与 v1 的逐消息过滤语义近似但不完全等价
+
+### `src/kernel/report-html.ts` — HTML 报告
 
 - 生成内嵌 ECharts 的独立 HTML 文件，自动在浏览器打开
 - **costPer1K 公式**：`cost / (input + output + cacheRead + cacheWrite) * 1000`
@@ -242,7 +249,7 @@ stats-store.ts      → ~/.opencode/tokenwatch-stats.json（永久累积，不�
 
 ---
 
-## 重要数据类型（`src/formatter.ts`）
+## 重要数据类型（`src/kernel/format.ts`）
 
 ```typescript
 interface TokenMessage {          // TUI 内存模型（单条 assistant 消息）
@@ -295,6 +302,10 @@ const tokenTotal = (msg) =>
 ---
 
 ## 已知 Bug 修复状态汇总
+
+> 下表为历史记录，"位置"列是 v0.6.0 重构前的文件路径（perf-tracker.ts →
+> kernel/perf.ts、stats-store.ts → kernel/store.ts、queries.ts →
+> host/v1/data-source.ts、generate-usage-html.ts → kernel/report-html.ts）。
 
 | 优先级 | 位置 | 问题描述 | 修复状态 |
 |---|---|---|---|

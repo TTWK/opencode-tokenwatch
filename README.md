@@ -4,29 +4,33 @@
 
 ![Sidebar](./assets/sidebar.png)
 
-OpenCode CLI 的实时 Token 用量统计、缓存分析与性能指标插件。
+OpenCode CLI的终端监控插件，在侧边栏实时显示Token用量、缓存命中率与模型响应速度，并支持一键生成网页版可视化用量报表。
 
-## 功能
+---
 
-- **侧边栏面板** — 会话级与按模型的实时统计（请求数、Token、缓存、成本）
-- **缓存命中率** — 按模型实时追踪，带趋势指示器（↑/↓）与全局加权总计
-- **性能指标** — TTFT / TPS / 端到端延迟，含 P50/P95/P99 延迟分位数
-- **Token 分布** — 按角色（system / user / tool / output）分解用量占比
-- **成本追踪** — 按模型实时显示请求成本（需 provider 返回计费数据）
-- **错误率统计** — 识别并统计失败请求，实时计算错误率
-- **`/usage` 命令** — HTML 报告 → JSON 导出 → 文本报告 → 设置
-- **HTML 报告** — 交互式 ECharts 仪表盘：Token 趋势、性能对比、TPS 排名、错误率分析，自动在浏览器打开
-- **持久化统计** — 性能指标永久累积写入独立文件，历史数据不受会话重置影响
-- **多级折叠** — 面板、模型、子区块均可折叠，状态持久化
-- **语言切换** — 中英双语，跟随系统或手动切换
+## 主要特性
 
-## 安装
+- **侧边栏实时看板**：会话中随时查看各模型的输入输出Token、预估花费、缓存命中率，以及最近一次回复的首字延迟与生成速率。
+- **缓存命中率与趋势**：按模型追踪缓存利用效率，用箭头标注近几次请求的命中率是在上升还是下降。
+- **Token构成归类**：自动将Token按系统提示词、用户输入、工具调用和模型输出分别统计，清楚定位上下文占用大头。
+- **交互式用量报告**：在终端输入 `/usage` 即可在浏览器中打开ECharts 交互仪表盘，查看历史用量趋势、模型横向对比与失败请求统计；也可一键导出为JSON或Markdown文件。
+- **双版本无缝适配**：同时兼容 OpenCode 1.x 与 OpenCode 2（beta），自动识别宿主环境，无需手动切换或调整配置。
+
+---
+
+## 安装与配置
+
+### 1. 安装
+
+在项目中运行：
 
 ```sh
 npm install opencode-tokenwatch
 ```
 
-在 `opencode.json` 或 `opencode.jsonc` 中添加：
+### 2. 启用插件
+
+在配置文件 `opencode.json`（或 `opencode.jsonc`）中添加插件项：
 
 ```json
 {
@@ -35,56 +39,26 @@ npm install opencode-tokenwatch
 }
 ```
 
-### 版本兼容性
+重新打开 OpenCode，侧边栏便会自动载入 TokenWatch 面板。
 
-同一个 npm 包同时支持两代 OpenCode CLI，无需选择版本：
+---
 
-| 宿主 | 版本 | 入口 | 历史数据来源 |
-|------|------|------|--------------|
-| OpenCode CLI | 1.x（1.18+） | `dist/tui.js` 的 `tui(api)` | `opencode db`（SQLite，快） |
-| OpenCode 2（`@opencode-ai/cli@beta`） | 0.0.0-beta | `dist/tui.js` 的 `setup(ctx)` | 客户端遍历会话重算 |
+## 常用操作
 
-两代宿主共用同一套内核（统计、性能追踪、HTML 报告、配置），差异全部折叠在各自适配层，
-行为一致。
+在终端对话框中输入 `/usage` 即可唤出操作菜单：
 
-> **OpenCode 2 注意事项**
-> v2 移除了 `opencode db` 子命令，历史用量需在客户端遍历会话消息重算。
-> 首次执行 `/usage` 时会提示"正在首次扫描历史会话"，扫描结果在本次 TUI 进程内缓存，
-> 之后再次打开报告是即时的。
+- **HTML 报告**：选择统计日期范围，在默认浏览器中打开交互式图表。
+- **导出数据**：导出结构化 JSON 或 Markdown 报告，默认保存在 `~/.opencode/reports/` 目录下。
+- **设置**：在弹出的交互菜单中开关各个显示区块或切换中英文显示。改动会自动保存，不需要手动修改配置文件。
 
-## 配置
-
-在 OpenCode TUI 中输入 `/usage` → **设置**，可交互式开关各显示项和切换界面语言，配置自动持久化，无需手动编辑配置文件。
-
-## 用法
-
-在 OpenCode TUI 中输入 `/usage`，选择：
-
-- **HTML 报告** — 选择日期范围，生成仪表盘并在浏览器打开
-- **JSON 导出** — 导出完整用量数据至 `~/.opencode/reports/`
-- **文本报告** — 导出 Markdown 格式至 `~/.opencode/reports/`
-- **设置** — 开关侧边栏显示项、切换语言
-
-## 数据文件
-
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| JSONL 日志 | `~/.opencode/tokenwatch.jsonl` | 原始请求日志 |
-| 聚合统计 | `~/.opencode/tokenwatch-stats.json` | 持久化性能统计 |
-| 报告输出 | `~/.opencode/reports/` | HTML / JSON / Markdown 报告 |
+---
 
 ## 系统要求
 
-- OpenCode CLI 1.18+ 或 OpenCode 2（`@opencode-ai/cli@beta`）
-- Node.js 18+
+- **OpenCode CLI**：1.18+ 或 OpenCode 2（`@opencode-ai/cli@beta`）
+- **Node.js**：≥ 18.0.0
 
-## 构建
-
-```sh
-npm install
-npm run build          # tsc 类型声明 + esbuild 打包
-node scripts/smoke-dual-host.mjs   # 双宿主契约冒烟测试
-```
+---
 
 ## 相关项目
 
@@ -92,6 +66,8 @@ node scripts/smoke-dual-host.mjs   # 双宿主契约冒烟测试
 - [opencode-visual-cache](https://github.com/Hotakus/opencode-visual-cache) — TUI 侧边栏缓存命中率可视化，Token 分布分析
 - [magic-context](https://github.com/cortexkit/magic-context/) — 缓存感知的无限上下文 + 跨会话记忆系统
 
-## 许可
+---
+
+## 协议
 
 MIT

@@ -1,10 +1,20 @@
+# 依赖与构建输出
 node_modules/
 dist/
 *.tsbuildinfo
-.opencode/
+
+# 文档相关目录与文件
+docs/
+doc/
+*.doc
+*.docx
+
+# 隐藏文件夹（忽略除 .github 外的所有隐藏文件夹）
+.*/
+!.github/
+
+# 本地运行与临时导出文件
 tokenwatch-*.json
 tokenwatch-*.csv
 tokenwatch-*.html
 tokenwatch-*.md
-.worktrees/
-.workbuddy/
