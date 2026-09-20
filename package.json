@@ -1,6 +1,6 @@
 {
   "name": "opencode-tokenwatch",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI",
   "type": "module",
   "main": "./dist/server.js",
@@ -58,11 +58,14 @@
     "url": "https://github.com/TTWK/opencode-tokenwatch/issues"
   },
   "homepage": "https://github.com/TTWK/opencode-tokenwatch#readme",
+  "dependencies": {
+    "@opentui/core": "^0.5.11",
+    "@opentui/solid": "^0.5.11",
+    "solid-js": ">=1.9.0"
+  },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.30",
-    "@opentui/core": "^0.5.11",
     "@opentui/keymap": "^0.5.11",
-    "@opentui/solid": "^0.5.11",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "esbuild-plugin-solid": "^0.5.0",
@@ -72,19 +75,8 @@
     "access": "public"
   },
   "peerDependencies": {
-    "solid-js": ">=1.9.0",
     "@opentui/core": ">=0.5.0",
-    "@opentui/solid": ">=0.5.0"
-  },
-  "peerDependenciesMeta": {
-    "solid-js": {
-      "optional": true
-    },
-    "@opentui/core": {
-      "optional": true
-    },
-    "@opentui/solid": {
-      "optional": true
-    }
+    "@opentui/solid": ">=0.5.0",
+    "solid-js": ">=1.9.0"
   }
 }
