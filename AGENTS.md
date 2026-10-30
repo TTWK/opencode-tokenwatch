@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-09-20（v0.6.1）
+> 最后更新：2026-10-30（v0.6.2）
 
 ---
 
@@ -24,7 +24,7 @@
 opencode-tokenwatch/
 ├── src/                        # 所有源码
 │   ├── tui.tsx                 # TUI 分发入口：默认导出 { id, tui, setup }（见下方说明）
-│   ├── server.ts               # Server 插件入口（空壳 server + 惰性动态 import 的 setup）
+│   ├── server.ts               # Server 插件入口（纯空壳，禁止引用 TUI 代码图）
 │   ├── kernel/                 # ★ 共享内核：零宿主依赖（无 opentui / 无 opencode 类型）
 │   │   ├── model.ts            #   归一化 TokenMessage + 命中率/有效性判定
 │   │   ├── format.ts           #   数据格式化 & 全部 TypeScript 类型定义
@@ -67,7 +67,8 @@ opencode-tokenwatch/
 ```
                  opencode 1.x                    opencode 2 (beta)
                       │                                 │
-           loader: 读 default.tui()           loader: 读 default.setup(ctx)
+           loader: 读 default.tui()     TUI 进程: 读 exports["./tui"] → setup(ctx)
+                                       server 进程: 读 exports["./server"]（空壳）
                       └────────────┬────────────────────┘
                                    ▼
                     src/tui.tsx  { id, tui, setup }
@@ -91,7 +92,7 @@ opencode-tokenwatch/
 
 | 差异维度 | v1（1.18+） | v2（beta） |
 |---|---|---|
-| 模块契约 | `default.tui(api)` | `default.setup(ctx)`，需 `id` + `setup` |
+| 模块契约 | `default.tui(api)`（主入口） | TUI 进程加载 `exports["./tui"]` 调 `setup(ctx)`（需 `id` + `setup`）；server 进程只加载 `exports["./server"]`，为空壳 |
 | 插槽 | `api.slots.register({ sidebar_content })` | `ui.slot({ append: "sidebar.content", render })`，入参 `{ sessionID }` |
 | 事件 | `message.updated` / `message.part.updated` | `session.step.ended` / `session.text.started` / `session.message.content.updated` |
 | 命令 | `api.command.register` + `DialogSelect` | `keymap.layer`（`{ id, title, slash, run }`）+ `dialog.select` |
@@ -102,8 +103,16 @@ opencode-tokenwatch/
 | 历史用量 | `opencode db` SQL | 无 db 子命令 → `client.session.list`/`message.list` cursor 翻页全量扫描（覆盖 v1 历史；首次提示用户） |
 
 **约束**：v1 加载器禁止 `server` 与 `tui` 同时出现（允许 `setup` 等其他字段），
-因此 `dist/tui.js` 携带 `{ id, tui, setup }`，`dist/server.js` 携带 `{ id, server, setup }`
-（后者的 setup 用动态 import 惰性加载，避免 server 进程解析 @opentui）。
+因此 `dist/tui.js` 携带 `{ id, tui, setup }`，`dist/server.js` 携带 `{ id, server, setup }`。
+
+**server 入口必须是纯空壳（v0.6.2 起）**：opencode2 的 server 进程只加载
+`exports["./server"]`，不会加载 `./tui`（后者 `features.tui` 仅作存在性探测，
+真正加载发生在 TUI 进程）。server 进程没有 TUI 的 @opentui 运行时改写层
+（`bun-plugin-opentui-runtime-modules`），一旦在 server 侧 import `./tui.js`，
+`@opentui` 会以磁盘副本形式加载，而它的 env 注册表是 `globalThis` 上的
+`Symbol.for("@opentui/core/singleton")` 单例（跨副本共享），与宿主内嵌副本的
+`OPENTUI_FORCE_UNICODE` 描述不一致时 `registerEnvVar` 直接抛错，插件整体加载失败。
+`build.tui.mjs` 对此有产物断言（server.js 不得出现 `./tui.js` 或 `@opentui`）。
 
 **v2 keymap.layer 的 owner 约束（重要）**：宿主的 `Keymap.createLayer` 内部先
 `useValue()` 读 Keymap Provider 上下文，再经 `useBindings` 调 `createEffect`——
@@ -423,10 +432,32 @@ node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
 | `esbuild-plugin-solid` | esbuild 插件，SolidJS JSX -> createComponent 转换（v0.5.0 新增） |
 
 > 以上均为 devDependencies，运行时由 OpenCode CLI 宿主环境提供。
+>
+> **不要把 `@opentui/*` 或 `solid-js` 放进 `dependencies`**（v0.6.1 的教训）：
+> 宿主 TUI 进程会用 `bun-plugin-opentui-runtime-modules` 把这些裸导入改写为
+> `opentui:runtime-module:`（内建 `@opentui/core`/`@opentui/solid`/`solid-js`/
+> `solid-js/store` 等），插件自带副本纯属多余；而一旦装了副本，server 进程
+> 或改写未覆盖的路径就会加载第二份实例，触发 env 注册冲突。
+> `peerDependencies` 保留为声明用途，但必须配 `peerDependenciesMeta.optional`，
+> 避免 npm 7+ 自动安装出私有副本。
 
 ---
 
 ## 版本历史
+
+### v0.6.2（2026-10-30）
+
+- **修复 v0.6.1 在 opencode2 启动时报 "Server plugin error"**
+  （`OPENTUI_FORCE_UNICODE is already registered with different configuration`）：
+  - `src/server.ts` 的 `setup` 改为纯空壳，删除 `await import("./tui.js")` ——
+    server 进程不再把 TUI 代码图（@opentui）拖进来
+  - `@opentui/*`、`solid-js` 从 `dependencies` 移入 `devDependencies`，
+    `peerDependencies` 配 `peerDependenciesMeta.optional: true`，
+    安装后不再产生 `node_modules/@opentui` 私有副本（依赖宿主 TUI 运行时改写）
+  - `build.tui.mjs` 产物断言反向：`dist/server.js` 出现 `./tui.js` 或 `@opentui` 即构建失败
+  - 无头回归新增 server 入口断言：setup 不触碰 ctx、返回 undefined
+- 已在 opencode 2.2.2 实测：服务端加载 `dist/server.js` 无报错，TUI 进程加载
+  `dist/tui.js` 后侧边栏（TokenWatch 面板）与 `/usage` 命令正常
 
 ### v0.6.0（2026-09-06，未发布）
 

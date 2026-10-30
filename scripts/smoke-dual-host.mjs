@@ -179,5 +179,21 @@ assert.equal(typeof plugin.tui, "function")
 assert.ok(!("server" in plugin), "v1 约束：tui 模块不得携带 server")
 console.log("contract checks: OK")
 
+// ───────────────────────── server 入口（v2 server 进程）─────────────────────────
+// opencode2 的 server 只加载 exports["./server"]；该入口必须保持纯空壳，
+// 否则 @opentui 会进入没有运行时改写层的 server 进程并与宿主内嵌副本冲突。
+{
+  const serverModule = await import("../dist/server.js")
+  assert.equal(serverModule.default?.id, "opencode-tokenwatch", "server: id")
+  assert.equal(typeof serverModule.default?.server, "function", "server: server()")
+  assert.equal(typeof serverModule.default?.setup, "function", "server: setup()")
+  const touched = []
+  const spy = new Proxy({}, { get: (_t, key) => { touched.push(String(key)); return () => {} } })
+  const ret = await serverModule.default.setup(spy)
+  assert.equal(ret, undefined, "server: setup() returns undefined")
+  assert.deepEqual(touched, [], "server: setup() must not touch ctx (pure no-op)")
+  console.log("server setup(): OK  (pure no-op)")
+}
+
 if (typeof cleanup === "function") cleanup()
 console.log("\nALL SMOKE TESTS PASSED")

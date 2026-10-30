@@ -19,6 +19,7 @@ import { join, dirname } from "node:path"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dist = pathToFileURL(join(here, "..", "dist", "tui.js")).href
+const serverEntry = pathToFileURL(join(here, "..", "dist", "server.js")).href
 
 const results = []
 function check(name, cond, extra = "") {
@@ -274,6 +275,21 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
   check("v1 命令列表包含 TokenWatch /usage", !!usage, JSON.stringify(cmds?.map?.((c) => c.title) ?? cmds))
   check("v1 注册了 sidebar_content 插槽", slots.some((s) => s?.slots?.sidebar_content))
   // v1 面板渲染需真实 opentui renderer，headless 下不调用（真实宿主已验证）
+}
+
+// ══ server 入口（v2 server 进程只加载 exports["./server"]）══
+// 必须保持纯空壳：绝不能把 TUI 代码图（@opentui）拖进没有运行时改写层的 server 进程，
+// 否则插件自带/宿主内嵌的 @opentui 会在同进程重复注册 OPENTUI_FORCE_UNICODE 而崩溃。
+{
+  const serverMod = await import(serverEntry)
+  check(
+    "server 入口导出 { id, server, setup } 且 setup 可调用",
+    serverMod.default?.id === "opencode-tokenwatch" && typeof serverMod.default?.server === "function" && typeof serverMod.default?.setup === "function",
+  )
+  const touched = []
+  const spy = new Proxy({}, { get: (_t, prop) => { touched.push(String(prop)) ; return () => {} } })
+  const ret = await serverMod.default.setup(spy)
+  check("server setup() 是空壳（不触碰 ctx、返回 undefined）", touched.length === 0 && ret === undefined, `touched=${touched.join(",")} ret=${typeof ret}`)
 }
 
 // ══ 汇总 ══

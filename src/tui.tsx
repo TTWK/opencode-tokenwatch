@@ -4,7 +4,8 @@
  *
  * default export 同时携带 `tui` 与 `setup`：
  * - opencode 1.x 加载后调用 `tui(api)`（v1 加载器只认 tui，忽略 setup）
- * - opencode2 加载后调用 `setup(ctx)`（v2 校验只查 id + setup，忽略 tui）
+ * - opencode2 的 TUI 进程按 exports["./tui"] 加载本文件并调用 `setup(ctx)`
+ *   （v2 契约：id + setup；server 进程加载的是 dist/server.js 的空壳，与本文件无关）
  *
  * 宿主调用哪个入口，本身就是 100% 可靠的代际判断，无需任何启发式探测。
  */
