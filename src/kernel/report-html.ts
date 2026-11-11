@@ -45,16 +45,14 @@ function renderKpiCards(data: CombinedReportData): string {
   const s = data.summary
   const hitRate = cacheHitRate(s.inputTokens, s.cacheRead)
   const hitRatePct = fmtPercent(hitRate)
-  let tpsSum = 0, tpsReqs = 0;
+  let tpsTokens = 0, tpsMs = 0;
   for (const p of data.perfSummary) {
-    // 按"有 TPS 样本的请求数"加权：requestCount 含无 TPS 的请求，会引入偏差
-    if (p.avgTPS != null && p.avgTPS > 0) {
-      tpsSum += p.avgTPS * p.tpsCount;
-      tpsReqs += p.tpsCount;
-    }
+    // 跨模型仍按 provider 活跃耗时加权，不能按请求数平均各模型速率
+    tpsTokens += p.totalTpsTokens ?? 0
+    tpsMs += p.totalTpsMs ?? 0
   }
-  const avgTpsRaw = tpsReqs > 0 ? tpsSum / tpsReqs : 0
-  const avgTps = tpsReqs > 0 ? avgTpsRaw.toFixed(1) : '—'
+  const avgTpsRaw = tpsMs > 0 ? tpsTokens / (tpsMs / 1000) : 0
+  const avgTps = tpsMs > 0 ? avgTpsRaw.toFixed(1) : '—'
   const isHighCache = hitRate >= 0.5
 
   const errors = (data as any).errors as { errorRate: number; failedCount: number } | undefined

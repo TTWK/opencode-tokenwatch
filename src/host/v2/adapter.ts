@@ -189,11 +189,11 @@ function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | 
     cacheWrite: cache.write ?? 0,
     total,
     cost: typeof data?.cost === "number" ? data.cost : 0,
-    // step.ended 事件本身不带时间；从消息对象补齐（性能追踪需要 created/completed）。
-    // TPS 的流式终点优先取 time.streamed（provider 响应体接收完毕，剔除收尾
-    // settlement 时间），与宿主官方 tok/s 口径一致；缺失时回退 completed。
+    // step.ended 事件本身不带时间；从消息对象补齐。streamed 与 completed
+    // 必须分开：TPS 使用 provider 响应体边界，latency 使用端到端完成边界。
     timeCreated: message?.time?.created ?? data?.time?.created,
-    timeCompleted: message?.time?.streamed ?? message?.time?.completed ?? data?.time?.completed,
+    timeStreamed: message?.time?.streamed,
+    timeCompleted: message?.time?.completed ?? data?.time?.completed ?? message?.time?.streamed,
     raw: data,
   }
 }
@@ -230,9 +230,8 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
           handlers.onInvalidate()
         }),
       )
-      // TPS 流式窗口起点（对齐宿主官方 tok/s 口径 output/(streamed−created)）：
-      // step.started = LLM 请求起点（reasoning 由此开始流式）。min() 逻辑会
-      // 自动取最早锚点，普通模型即 text.started，推理模型即 step/reasoning。
+      // 请求起点事件仅用于缺少 delta 时的 TTFT 回退。TPS 不再使用事件锚点，
+      // 而是在 step.ended 时直接读取消息的 created/streamed。
       off.push(
         ctx.data.on("session.step.started", (event: any) => {
           const data = event?.data ?? {}
@@ -246,7 +245,7 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
         }),
       )
       // 推理/文本 part 的"打开"事件：provider 打开占位符即发（≈ step 起点，
-      // 恒早于首 token），只作 TPS 流式窗口锚点，不参与 TTFT
+      // 恒早于首 token），只作请求窗口记录，不作为首 token 锚点
       off.push(
         ctx.data.on("session.reasoning.started", (event: any) => {
           const data = event?.data ?? {}

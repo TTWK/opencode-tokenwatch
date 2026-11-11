@@ -50,11 +50,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     term.write("/us");
     await sleep(3000);
     v = strip(buf);
-    console.log("COMPLETION usage:", /usage/.test(v), "| TokenWatch:", /TokenWatch/.test(v));
+    // opencode 2.2.6 内置了同名 /usage；插件项描述为 Token usage reports…
+    const pluginCompletion = /TokenWatch|Token usage reports/i.test(v);
+    console.log("COMPLETION usage:", /usage/.test(v), "| TokenWatch:", pluginCompletion);
     console.log("TAIL_AFTER_US:", JSON.stringify(strip(v).slice(-700)));
 
     term.write("age");
     await sleep(1500);
+    // 内置 /usage 排在前面时，Down 选择插件的 /usage；仅一项时 Down 无副作用。
+    term.write("\x1b[B");
+    await sleep(300);
     term.write("\r");
     await sleep(5000);
     v = strip(buf);

@@ -4,7 +4,8 @@
  *
  * 口径约定（与宿主官方对齐，详见 AGENTS.md）：
  * - tokenTotal 五分量：input + output + reasoning + cache.read + cache.write
- * - TPS：可见输出 tokens / (流式终点 − 流式窗口起点)，单位 tok/s
+ * - 单步 TPS：(可见输出 + reasoning) / (streamed − created)，单位 tok/s
+ * - 会话平均 TPS：Σ(可见输出 + reasoning) / Σ(streamed − created)，按活跃耗时加权
  * - TTFT：首个"首 token"锚点（可见输出 part / delta）− 请求起点
  * - latency：端到端 completed − created（含收尾 settlement）
  */
@@ -58,6 +59,8 @@ export interface ModelAccumulator {
   maxTTFT: number | null
   minTTFT: number | null
   avgTPS: number | null
+  totalTpsTokens: number
+  totalTpsMs: number
   maxTPS: number | null
   minTPS: number | null
   avgLatency: number | null
@@ -82,7 +85,7 @@ export function createAccumulator(model: string, providerID: string): ModelAccum
     latencyCount: 0,
     totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheWrite: 0, totalCost: 0,
     avgTTFT: null, maxTTFT: null, minTTFT: null,
-    avgTPS: null, maxTPS: null, minTPS: null,
+    avgTPS: null, totalTpsTokens: 0, totalTpsMs: 0, maxTPS: null, minTPS: null,
     avgLatency: null, maxLatency: null, minLatency: null,
     ttftReservoir: [],
     latencyReservoir: [],
@@ -121,13 +124,30 @@ export function accumulateEntry(acc: ModelAccumulator, entry: LogEntry): void {
     acc.lastTTFT = entry.ttft_ms
   }
 
-  if (entry.tps != null) {
+  // 旧 JSONL 没有 active_ms：其 v2 latency_ms 本就是 streamed-created，
+  // v1 则以 completed-created 近似。根据原始 token 与时间重算，不能沿用旧 tps。
+  const activeMs = entry.active_ms ?? entry.latency_ms
+  const tpsTokens = entry.outputTokens + entry.reasoningTokens
+  if (activeMs != null && activeMs > 0 && tpsTokens > 0) {
+    // 旧持久化 accumulator 没有加权所需的分子/分母，无法无损转换；
+    // 从首个新样本开始建立新口径序列，避免把旧算术平均混入新结果。
+    if (acc.totalTpsTokens == null || acc.totalTpsMs == null) {
+      acc.tpsCount = 0
+      acc.avgTPS = null
+      acc.maxTPS = null
+      acc.minTPS = null
+      acc.lastTPS = null
+      acc.totalTpsTokens = 0
+      acc.totalTpsMs = 0
+    }
+    const stepTps = tpsTokens / (activeMs / 1000)
     acc.tpsCount++
-    const c = acc.tpsCount
-    acc.avgTPS = acc.avgTPS != null ? acc.avgTPS + (entry.tps - acc.avgTPS) / c : entry.tps
-    acc.maxTPS = acc.maxTPS != null ? Math.max(acc.maxTPS, entry.tps) : entry.tps
-    acc.minTPS = acc.minTPS != null ? Math.min(acc.minTPS, entry.tps) : entry.tps
-    acc.lastTPS = entry.tps
+    acc.totalTpsTokens += tpsTokens
+    acc.totalTpsMs += activeMs
+    acc.avgTPS = acc.totalTpsTokens / (acc.totalTpsMs / 1000)
+    acc.maxTPS = acc.maxTPS != null ? Math.max(acc.maxTPS, stepTps) : stepTps
+    acc.minTPS = acc.minTPS != null ? Math.min(acc.minTPS, stepTps) : stepTps
+    acc.lastTPS = stepTps
   }
 
   if (entry.latency_ms != null) {
@@ -164,9 +184,11 @@ export function finalizeAccumulator(acc: ModelAccumulator): ModelPerfStats {
     p50TTFT: computePercentile(ttftArr, 50),
     p95TTFT: computePercentile(ttftArr, 95),
     p99TTFT: computePercentile(ttftArr, 99),
-    avgTPS: acc.avgTPS,
-    maxTPS: acc.maxTPS,
-    minTPS: acc.minTPS,
+    avgTPS: (acc.totalTpsMs ?? 0) > 0 ? acc.avgTPS : null,
+    totalTpsTokens: acc.totalTpsTokens ?? 0,
+    totalTpsMs: acc.totalTpsMs ?? 0,
+    maxTPS: (acc.totalTpsMs ?? 0) > 0 ? acc.maxTPS : null,
+    minTPS: (acc.totalTpsMs ?? 0) > 0 ? acc.minTPS : null,
     avgLatency: acc.avgLatency,
     maxLatency: acc.maxLatency,
     minLatency: acc.minLatency,
@@ -176,7 +198,7 @@ export function finalizeAccumulator(acc: ModelAccumulator): ModelPerfStats {
     cacheHitRate: denom > 0 ? (acc.totalCacheRead / denom) * 100 : null,
     // 旧版本持久化文件可能缺少 last* 字段（undefined），统一归一化为 null
     lastTTFT: acc.lastTTFT ?? null,
-    lastTPS: acc.lastTPS ?? null,
+    lastTPS: (acc.totalTpsMs ?? 0) > 0 ? acc.lastTPS ?? null : null,
     lastLatency: acc.lastLatency ?? null,
   }
 }

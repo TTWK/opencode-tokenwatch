@@ -34,7 +34,7 @@ function toPerfMessageEvent(e: NormalizedMessageEvent) {
           total: e.total,
         },
         cost: e.cost,
-        time: { created: e.timeCreated, completed: e.timeCompleted },
+        time: { created: e.timeCreated, streamed: e.timeStreamed, completed: e.timeCompleted },
       },
     },
   }

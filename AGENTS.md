@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-10-30（v0.6.2）
+> 最后更新：2026-11-11（v0.6.3）
 
 ---
 
@@ -10,7 +10,7 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.6.2`
+- **版本**：`0.6.3`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
 - **构建工具**：`tsc`（类型声明生成）+ `esbuild`（JS 打包，含 SolidJS JSX 预编译）
@@ -164,9 +164,9 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 | tokenTotal | input+output+reasoning+cacheRead+cacheWrite（5分量） | v1 `packages/app/src/components/session/session-context-metrics.ts` tokenTotal；v2 `context/data.js` lastAssistantWithUsage | ✓ 一致 |
 | 失败过滤 | 五分量合计 = 0 跳过（含 reasoning） | 同上（tokenTotal <= 0 continue） | ✓ |
 | cacheHitRate | cacheRead / (cacheRead + input) | v2 `core/session/usage.ts`：input = nonCachedInputTokens | ✓ 分母即全部输入 |
-| TPS (v2) | output / (time.streamed − 流式窗口起点) | v2 `tui/routes/session/rows.ts` turnTokensPerSecond | ✓（每消息=每 step；窗口起点来自 step.started 事件） |
+| TPS (v2) | 单步 (output+reasoning)/(streamed−created)；会话为分子分母分别求和后相除 | v2 `util/session-turn.ts` tokensPerSecond | ✓ 按活跃耗时加权，单 turn 单模型与官方一致 |
 | TTFT (v2) | 首个 reasoning/text **delta** 事件 − step 起点 | part.started 是占位符打开（≈step 起点+0~20ms），delta 才是首 token | ✓ |
-| TPS/TTFT (v1) | part.time.start 首锚 / completed 终点 | v1 无官方 tok/s 展示；part.start 即首 token | ✓ |
+| TPS/TTFT (v1) | TPS=(output+reasoning)/(completed−created)；TTFT=part.time.start−created | v1 无官方 tok/s 展示；completed 近似 streamed | ✓ |
 | daily 分桶 | 两代均按**本地时区**日期 | v1 SQL date(...,'localtime') | ✓（v2 曾用 UTC 已修） |
 | token 分布 | chars/4 估算（json/code/CJK 修正），output 用真实 tokens | 官方无角色分布；同类插件同为 chars/4 系估算 | ✓ 估算性质（UI 已标注） |
 | cost/1K | cost / (i+o+cr+cw) × 1000（混合费率） | 官方 cost 按分段每百万计价 | ✓ 口径成立 |
@@ -203,12 +203,11 @@ openInBrowser       → spawn detached（不阻塞 TUI）
 - **无效数据过滤**：`handleMessageUpdated` 跳过全零 token 请求，不写 JSONL / stats
 - **TTFT**：取最早**可见输出锚点**（`Math.min`）——v1 为 text/reasoning/tool part 的
   `time.start`，v2 为首个 `*-delta` 事件；step / part-open / step-start / step-finish
-  等"窗口锚点"只参与 TPS 窗口，不参与 TTFT
-- **TPS**：`outputTokens / genMs * 1000`；genMs = 流式终点 − 最早**任意** part 起点。
-  v2 的流式终点优先 `time.streamed`（provider 响应体接收完），起点为
-  `session.step.started` —— 与宿主官方 tok/s 口径 `output/(streamed−created)` 一致；
-  推理模型的 reasoning 阶段计入分母（此前只锚 text.started 导致 TPS 虚高数倍）；
-  无可靠 genMs 时为 null（不使用含排队时间的 fallback）
+  等"窗口锚点"不作为首 token，不参与 TTFT
+- **TPS**：单步 `(outputTokens + reasoningTokens) / activeMs * 1000`；
+  activeMs = `time.streamed − time.created`（v1 以 completed 近似），直接读取消息时间，
+  不依赖 part/step 事件锚点。会话与报告均按 `Σ(output+reasoning) / ΣactiveMs`
+  计算活跃耗时加权值，而非各请求 TPS 的算术平均；latency 独立使用 completed−created
 - **平均值**：Welford 在线均值，分母使用独立的 `ttftCount` / `tpsCount` 计数器
 - 每条请求完成后调用 `store.updatePersistedStats(entry)` 写入持久化统计
 - 会话内数据存内存；session 切换时 `loadSession()` 异步重放 JSONL 恢复
@@ -445,6 +444,17 @@ node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
 
 ## 版本历史
 
+### v0.6.3（2026-11-11）
+
+- **修复侧边栏会话 TPS 失真**：
+  - 单步 TPS 改为 `(output + reasoning) / (streamed - created)`，与 OpenCode v2
+    `SessionTurn.tokensPerSecond` 对齐，包含 reasoning 与 TTFT 窗口
+  - `timeStreamed` 与 `timeCompleted` 分离，TPS 使用 streamed，端到端延迟使用 completed
+  - 会话与报告平均 TPS 改为 `Σ(output + reasoning) / ΣactiveMs`，不再对单步 TPS 做算术平均
+  - 旧 JSONL 重放忽略旧 `tps`，按原始 token 与 `latency_ms` 重算；缺少加权字段的旧持久化统计不再输出假值
+- **测试**：新增 `npm run test:tps`，13 项回归覆盖 1303.8 → 107.5 异常单步与整轮 75.3
+- **E2E**：兼容 OpenCode 2.2.6 内置同名 `/usage`，通过 Down 选择插件命令项
+
 ### v0.6.2（2026-10-30）
 
 - **修复 v0.6.1 在 opencode2 启动时报 "Server plugin error"**
@@ -472,4 +482,4 @@ node scripts/e2e/opencode-v1-e2e.js # opencode (v1.18)
 - **内部**：新增 kernel/perf-aggregate.ts 统一三处 Welford/分位数聚合；删除死代码；净 -416 行
 - 兼容性：kv 配置键与 tokenwatch-stats.json 格式向后兼容；v1 行为不变
 
-*本文档于 2026-09-06 更新，版本 v0.6.0。*
+*本文档于 2026-11-11 更新，版本 v0.6.3。*

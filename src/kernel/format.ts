@@ -442,7 +442,11 @@ export interface ModelPerfStats {
   p50TTFT: number | null   // TTFT 中位数
   p95TTFT: number | null   // TTFT P95
   p99TTFT: number | null   // TTFT P99
+  /** 会话内按 provider 活跃耗时加权的 TPS：Σ(output+reasoning) / ΣactiveMs */
   avgTPS: number | null
+  /** 用于跨模型继续按活跃耗时加权的分子与分母 */
+  totalTpsTokens: number
+  totalTpsMs: number
   maxTPS: number | null
   minTPS: number | null
   avgLatency: number | null
@@ -467,6 +471,9 @@ export interface LogEntry {
   sessionID: string
   ttft_ms: number | null
   tps: number | null
+  /** provider 活跃窗口：streamed - created；旧日志缺省时以 latency_ms 近似 */
+  active_ms?: number | null
+  /** 端到端延迟：completed - created */
   latency_ms: number | null
   inputTokens: number
   outputTokens: number

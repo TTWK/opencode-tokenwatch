@@ -84,6 +84,8 @@ function normalizeMessageUpdated(event: any): NormalizedMessageEvent | null {
     total: tokens.total ?? 0,
     cost: info.cost ?? 0,
     timeCreated: info.time?.created,
+    // v1 没有独立 streamed 边界，以 completed 作为生成终点近似
+    timeStreamed: info.time?.completed,
     timeCompleted: info.time?.completed,
     raw: event,
   }

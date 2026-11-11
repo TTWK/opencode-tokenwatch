@@ -41,7 +41,9 @@ export interface NormalizedMessageEvent {
   readonly cost: number
   /** 请求开始时间（epoch ms），供性能追踪计算延迟/TPS */
   readonly timeCreated?: number
-  /** 请求完成时间（epoch ms），缺失时性能追踪跳过该样本 */
+  /** provider 响应体接收完成时间（epoch ms）；v1 以 completed 近似 */
+  readonly timeStreamed?: number
+  /** 端到端完成时间（epoch ms），包含 streamed 后的工具收尾 settlement */
   readonly timeCompleted?: number
   /** 原始事件对象，供性能追踪器读取时间戳等宿主专属字段 */
   readonly raw: any

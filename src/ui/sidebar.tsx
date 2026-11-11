@@ -604,7 +604,7 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                         : null}
                     </text>
 
-                    {/* 性能指标：显示当前会话中该模型的均值（~TTFT 首字延迟与 ~TPS 生成速率） */}
+                    {/* ~TTFT 为请求算术均值；~TPS 为 Σ(output+reasoning)/Σ活跃耗时，非单时速率均值 */}
                     <Show when={config().sidebar.showPerformance && !!perfStats().models[key]}>
                       <text fg={mutedColor()} marginTop={1}>
                         ~{t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.avgTTFT ?? null)}</span>

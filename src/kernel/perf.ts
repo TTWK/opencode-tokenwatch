@@ -32,7 +32,7 @@ interface MessageUpdateEvent {
         cache?: { read?: number; write?: number }
       }
       cost?: number
-      time?: { created?: number; completed?: number }
+      time?: { created?: number; streamed?: number; completed?: number }
     }
   }
 }
@@ -45,7 +45,7 @@ interface MessageRemoveEvent {
 }
 
 class PerfTracker {
-  /** 最早的任意 part（含 step 起点）—— 用作 TPS 的流式窗口起点（对齐宿主官方口径） */
+  /** 最早的任意 part，仅在缺少内容锚点时作为 TTFT 回退；不参与 TPS 窗口 */
   private firstPartTimes = new Map<string, number>()
   /** 最早的输出 part（text/reasoning）—— 用作 TTFT（用户等待首个可见 token 的时间） */
   private firstOutputTimes = new Map<string, number>()
@@ -64,7 +64,8 @@ class PerfTracker {
     // time.start 即首 token）与 v2 的 delta 事件（首个内容片段）。
     // 窗口锚点（v2 的 step / part-open，v1 的 step-start / step-finish，
     // 以及一切 *-started 占位符打开事件）标记的是"请求/阶段开始"而非首
-    // token，只参与 TPS 窗口，不参与 TTFT —— 否则 v1 的 TTFT 会恒为毫秒级。
+    // token，不参与 TTFT —— 否则 v1 的 TTFT 会恒为毫秒级。TPS 则直接
+    // 使用消息的 created → streamed，不依赖这些可能缺失的事件锚点。
     const type = event.type
     const isDelta = type != null && type.endsWith("-delta")
     const isWindowAnchor = type === "step" || type === "part-open"
@@ -82,12 +83,12 @@ class PerfTracker {
   handleMessageUpdated(event: MessageUpdateEvent): void {
     const info = event.properties?.info
     if (!info || info.role !== "assistant") return
-    if (!info.time?.completed) return
 
     const messageID = info.id ?? ""
-    const created = info.time.created
-    const completed = info.time.completed
-    if (!created || !completed) {
+    const created = info.time?.created
+    const streamed = info.time?.streamed
+    const completed = info.time?.completed
+    if (!created || (!streamed && !completed)) {
       this.firstPartTimes.delete(messageID)
       this.firstOutputTimes.delete(messageID)
       return
@@ -116,15 +117,15 @@ class PerfTracker {
     const firstPart = this.firstPartTimes.get(messageID) ?? null
     const firstOutput = this.firstOutputTimes.get(messageID) ?? firstPart
 
-    const latencyMs = completed - created
+    const latencyMs = completed ? completed - created : null
+    const activeMs = streamed ? streamed - created : null
     const ttftMs = firstOutput !== null ? firstOutput - created : null
-    const genMs = firstPart !== null ? completed - firstPart : null
-    const tps = (genMs !== null && genMs > 0 && outputTokens > 0)
-      ? (outputTokens / genMs) * 1000
+    const tpsTokens = outputTokens + reasoningTokens
+    // 与宿主 SessionTurn.tokensPerSecond 一致：分子包含可见输出与 reasoning，
+    // 分母从请求 created 起算至 provider streamed，包含 TTFT 与 reasoning 阶段。
+    const tps = (activeMs !== null && activeMs > 0 && tpsTokens > 0)
+      ? (tpsTokens / activeMs) * 1000
       : null
-    // Bug fix: 移除 TPS fallback。
-    // 原 fallback 用 latencyMs（completed-created，含排队+TTFT）计算 TPS，
-    // 会使结果严重低估（约 40%+）。null 表示"无可靠数据"比虚假数字更好。
 
     this.firstPartTimes.delete(messageID)
     this.firstOutputTimes.delete(messageID)
@@ -136,7 +137,8 @@ class PerfTracker {
       modelID,
       sessionID,
       ttft_ms: ttftMs,
-      tps: tps,          // 只在有可靠 genMs 时才有值
+      tps,
+      active_ms: activeMs,
       latency_ms: latencyMs,
       inputTokens,
       outputTokens,
