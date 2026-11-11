@@ -8,4 +8,5 @@
  * 本文件同时满足两者：作为 v2 目录发现的标记文件，并导出 v1/v2 通用的
  * server 插件对象（v1 不使用本文件，它通过 package.json 的 exports 加载）。
  */
+export * from "./dist/server.js"
 export { default } from "./dist/server.js"

@@ -49,9 +49,9 @@ await Promise.all([
   }),
   // Server module - no JSX, 且绝不引用 TUI 代码图。
   // opencode2 的 TUI 进程会按 exports["./tui"] 独立加载 TUI 入口（并在 TUI 进程
-  // 调用其 setup），server 进程只执行本文件里的空 setup。若此处把 ./tui.js 内联
-  // 或动态 import，@opentui 会被拖进没有运行时改写层的 server 进程，与宿主内嵌
-  // 副本重复注册 env 变量（OPENTUI_FORCE_UNICODE）导致插件加载失败。
+  // 调用其 setup），server 进程加载本文件负责全端会话指标的静默采集与落盘。
+  // 若此处把 ./tui.js 内联或动态 import，@opentui 会被拖进没有运行时改写层的
+  // server 进程，与宿主内嵌副本重复注册 env 变量（OPENTUI_FORCE_UNICODE）导致插件加载失败。
   build({
     ...common,
     entryPoints: ["src/server.ts"],
@@ -59,7 +59,7 @@ await Promise.all([
   }),
 ])
 
-// ── 产物断言：server 入口必须是"零 TUI 依赖"的空壳 ──
+// ── 产物断言：server 入口必须是"零 TUI 依赖"的纯净服务端模块 ──
 // 这里曾要求 server.js 保留 import("./tui.js")（在 server 进程惰性加载 TUI 代码图）。
 // 该设计会让 @opentui 进入 server 进程，与宿主内嵌副本重复注册 env 变量
 // （OPENTUI_FORCE_UNICODE）导致插件加载失败。现在 TUI 由宿主按 exports["./tui"]
@@ -70,7 +70,7 @@ if (
   serverJs.includes("./tui.js") ||
   /import\s[^;]*["']@opentui\//.test(serverJs)
 ) {
-  console.error("✗ dist/server.js 引用了 TUI 代码图（./tui.js 或 @opentui）——server 入口必须保持纯空壳")
+  console.error("✗ dist/server.js 引用了 TUI 代码图（./tui.js 或 @opentui）——server 入口必须保持纯净服务端实现")
   process.exit(1)
 }
 if (!serverJs.includes('"opencode-tokenwatch"') || !serverJs.includes("setup")) {
