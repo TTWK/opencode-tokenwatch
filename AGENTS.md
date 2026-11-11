@@ -24,13 +24,14 @@
 opencode-tokenwatch/
 ├── src/                        # 所有源码
 │   ├── tui.tsx                 # TUI 分发入口：默认导出 { id, tui, setup }（见下方说明）
-│   ├── server.ts               # Server 插件入口（纯空壳，禁止引用 TUI 代码图）
+│   ├── server.ts               # Server 遥测收集入口（零 TUI 依赖，支持全端静默入库）
 │   ├── kernel/                 # ★ 共享内核：零宿主依赖（无 opentui / 无 opencode 类型）
 │   │   ├── model.ts            #   归一化 TokenMessage + 命中率/有效性判定
 │   │   ├── format.ts           #   数据格式化 & 全部 TypeScript 类型定义
 │   │   ├── i18n.ts             #   国际化（中文/英文/自动检测）
 │   │   ├── perf.ts             #   性能追踪（TTFT/TPS/延迟）+ JSONL 日志
 │   │   ├── store.ts            #   持久化聚合统计（不受日志轮转影响）
+│   │   ├── server-state.ts     #   Server 进程在线标记与跨进程协同
 │   │   ├── report.ts           #   报告数据装配 + 落盘（HTML/路径/唯一名）
 │   │   ├── report-html.ts      #   HTML 报告生成（ECharts 内嵌）
 │   │   └── config.ts           #   侧边栏配置读写（宿主无关）
@@ -92,7 +93,7 @@ opencode-tokenwatch/
 
 | 差异维度 | v1（1.18+） | v2（beta） |
 |---|---|---|
-| 模块契约 | `default.tui(api)`（主入口） | TUI 进程加载 `exports["./tui"]` 调 `setup(ctx)`（需 `id` + `setup`）；server 进程只加载 `exports["./server"]`，为空壳 |
+| 模块契约 | `default.tui(api)`（主入口） | TUI 进程加载 `exports["./tui"]` 调 `setup(ctx)`（需 `id` + `setup`）；server 进程加载 `exports["./server"]` 负责全端指标采集 |
 | 插槽 | `api.slots.register({ sidebar_content })` | `ui.slot({ append: "sidebar.content", render })`，入参 `{ sessionID }` |
 | 事件 | `message.updated` / `message.part.updated` | `session.step.ended` / `session.text.started` / `session.message.content.updated` |
 | 命令 | `api.command.register` + `DialogSelect` | `keymap.layer`（`{ id, title, slash, run }`）+ `dialog.select` |
@@ -105,14 +106,16 @@ opencode-tokenwatch/
 **约束**：v1 加载器禁止 `server` 与 `tui` 同时出现（允许 `setup` 等其他字段），
 因此 `dist/tui.js` 携带 `{ id, tui, setup }`，`dist/server.js` 携带 `{ id, server, setup }`。
 
-**server 入口必须是纯空壳（v0.6.2 起）**：opencode2 的 server 进程只加载
+**server 入口作为全端统一遥测底座（零 TUI 依赖）**：opencode2 的 server 进程只加载
 `exports["./server"]`，不会加载 `./tui`（后者 `features.tui` 仅作存在性探测，
 真正加载发生在 TUI 进程）。server 进程没有 TUI 的 @opentui 运行时改写层
-（`bun-plugin-opentui-runtime-modules`），一旦在 server 侧 import `./tui.js`，
-`@opentui` 会以磁盘副本形式加载，而它的 env 注册表是 `globalThis` 上的
-`Symbol.for("@opentui/core/singleton")` 单例（跨副本共享），与宿主内嵌副本的
-`OPENTUI_FORCE_UNICODE` 描述不一致时 `registerEnvVar` 直接抛错，插件整体加载失败。
-`build.tui.mjs` 对此有产物断言（server.js 不得出现 `./tui.js` 或 `@opentui`）。
+（`bun-plugin-opentui-runtime-modules`），因此 server 端代码图**必须 100% 杜绝
+引入任何 `@opentui` 或 JSX**。在本次架构演进中，`src/server.ts` 引入零宿主依赖的
+`src/kernel/perf.ts`，在 Server 侧静默捕获包括 Desktop、CLI、API 在内的全量会话指标
+并权威落盘（`tokenwatch.jsonl` / `tokenwatch-stats.json`）。同时通过
+`src/kernel/server-state.ts` 提供进程在线探测：当 Server 在线时，TUI 进程自动关闭
+本地文件落盘（`persistLog: false`），作为纯内存视图运行，彻底规避跨进程双重写入与
+文件竞争。`build.tui.mjs` 对此有产物断言（server.js 不得出现 `./tui.js` 或 `@opentui`）。
 
 **v2 keymap.layer 的 owner 约束（重要）**：宿主的 `Keymap.createLayer` 内部先
 `useValue()` 读 Keymap Provider 上下文，再经 `useBindings` 调 `createEffect`——

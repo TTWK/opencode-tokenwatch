@@ -44,7 +44,18 @@ interface MessageRemoveEvent {
   }
 }
 
+export interface PerfTrackerOptions {
+  /**
+   * 是否向 ~/.opencode/tokenwatch.jsonl 与 stats 写入日志与持久化统计。
+   * 默认为 true。若 Server 进程已在采集并权威落盘，客户端可将其设为 false 以免重复写入。
+   */
+  persistLog?: boolean
+}
+
 class PerfTracker {
+  private readonly persistLog: boolean
+  /** 已处理落盘的消息 ID 集合（防止 step.ended 与 message.updated 产生重复记录） */
+  private readonly completedMessageIDs = new Set<string>()
   /** 最早的任意 part，仅在缺少内容锚点时作为 TTFT 回退；不参与 TPS 窗口 */
   private firstPartTimes = new Map<string, number>()
   /** 最早的输出 part（text/reasoning）—— 用作 TTFT（用户等待首个可见 token 的时间） */
@@ -52,6 +63,10 @@ class PerfTracker {
   private statsMap = new Map<string, ModelAccumulator>()
   /** 会话加载令牌：异步重放期间再次切会话时，旧加载结果按令牌过期丢弃 */
   private loadToken = 0
+
+  constructor(options: PerfTrackerOptions = {}) {
+    this.persistLog = options.persistLog ?? true
+  }
 
   handlePartUpdated(event: PartEvent): void {
     if (!event.time?.start || !event.message_id) return
@@ -85,6 +100,10 @@ class PerfTracker {
     if (!info || info.role !== "assistant") return
 
     const messageID = info.id ?? ""
+    if (messageID && this.completedMessageIDs.has(messageID)) {
+      return
+    }
+
     const created = info.time?.created
     const streamed = info.time?.streamed
     const completed = info.time?.completed
@@ -130,6 +149,14 @@ class PerfTracker {
     this.firstPartTimes.delete(messageID)
     this.firstOutputTimes.delete(messageID)
 
+    if (messageID) {
+      this.completedMessageIDs.add(messageID)
+      if (this.completedMessageIDs.size > 1000) {
+        const oldest = this.completedMessageIDs.values().next().value
+        if (oldest) this.completedMessageIDs.delete(oldest)
+      }
+    }
+
     const entry: LogEntry = {
       ts: new Date().toISOString(),
       model,
@@ -153,6 +180,7 @@ class PerfTracker {
   }
 
   private appendLog(entry: LogEntry): void {
+    if (!this.persistLog) return
     try {
       // Risk fix: JSONL 日志轮转保护，防止长期使用后文件无限增长。
       // rename 轮转（原子）替代整读整写：进程崩溃不会截断日志，
@@ -286,8 +314,8 @@ class PerfTracker {
   }
 }
 
-export function createPerfTracker(): PerfTracker {
-  return new PerfTracker()
+export function createPerfTracker(options: PerfTrackerOptions = {}): PerfTracker {
+  return new PerfTracker(options)
 }
 export type { PartEvent, PerfTracker }
 export function readLogs(last: number = 50): LogEntry[] {

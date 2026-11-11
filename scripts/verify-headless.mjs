@@ -277,19 +277,42 @@ check("dist default export { id, tui, setup }", mod.default?.id === "opencode-to
   // v1 面板渲染需真实 opentui renderer，headless 下不调用（真实宿主已验证）
 }
 
-// ══ server 入口（v2 server 进程只加载 exports["./server"]）══
-// 必须保持纯空壳：绝不能把 TUI 代码图（@opentui）拖进没有运行时改写层的 server 进程，
+// ══ server 入口（负责集中遥测采集，构建统一数据底座）══
+// 绝不能把 TUI 代码图（@opentui）拖进没有运行时改写层的 server 进程，
 // 否则插件自带/宿主内嵌的 @opentui 会在同进程重复注册 OPENTUI_FORCE_UNICODE 而崩溃。
 {
   const serverMod = await import(serverEntry)
   check(
-    "server 入口导出 { id, server, setup } 且 setup 可调用",
-    serverMod.default?.id === "opencode-tokenwatch" && typeof serverMod.default?.server === "function" && typeof serverMod.default?.setup === "function",
+    "server 入口导出 { id, server, setup } 且函数健全",
+    serverMod.default?.id === "opencode-tokenwatch" &&
+      typeof serverMod.default?.server === "function" &&
+      typeof serverMod.default?.setup === "function",
   )
-  const touched = []
-  const spy = new Proxy({}, { get: (_t, prop) => { touched.push(String(prop)) ; return () => {} } })
-  const ret = await serverMod.default.setup(spy)
-  check("server setup() 是空壳（不触碰 ctx、返回 undefined）", touched.length === 0 && ret === undefined, `touched=${touched.join(",")} ret=${typeof ret}`)
+  // v1 路径：调用 server() 返回带有 event 的 Hooks 对象
+  const v1Hooks = await serverMod.default.server({})
+  check(
+    "server server() 满足 v1 Hooks 契约（包含 event 与 dispose）",
+    typeof v1Hooks?.event === "function" && typeof v1Hooks?.dispose === "function",
+  )
+  if (typeof v1Hooks?.dispose === "function") await v1Hooks.dispose()
+
+  // v2 路径：调用 setup(ctx) 支持 data.on 并返回清理函数
+  const subscribed = []
+  const v2ServerCtx = {
+    data: {
+      on(type, handler) {
+        subscribed.push(type)
+        return () => {}
+      },
+    },
+  }
+  const cleanup = await serverMod.default.setup(v2ServerCtx)
+  check(
+    "server setup(ctx) 满足 v2 契约（订阅关键事件并返回 dispose）",
+    subscribed.includes("session.step.ended") && typeof cleanup === "function",
+    `subscribed=${subscribed.join(",")}`,
+  )
+  if (typeof cleanup === "function") cleanup()
 }
 
 // ══ 汇总 ══

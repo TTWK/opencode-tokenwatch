@@ -9,6 +9,7 @@
 import { createSignal } from "solid-js"
 import { TokenWatchPanel } from "../ui/sidebar.js"
 import { createPerfTracker } from "../kernel/perf.js"
+import { isServerActive } from "../kernel/server-state.js"
 import type { TokenMessage } from "../kernel/model.js"
 import type { HostAdapter, NormalizedMessageEvent, NormalizedPartEvent } from "./types.js"
 
@@ -96,7 +97,11 @@ const SESSION_INDEX_KEY = "tokenwatch-session-index"
  * 事件 → 聚合/持久化/性能追踪 → 侧边栏渲染 的整条链路在此装配。
  */
 export function startTokenWatch(host: HostAdapter): () => void {
-  const perfTracker = createPerfTracker()
+  // 检测是否有活跃的 Server 遥测收集器在负责持久化。
+  // 若 Server 在线，TUI 进程中的 perfTracker 将关闭文件落盘（persistLog: false），仅作为内存视图；
+  // 若未检测到 Server（单进程 TUI 模式或测试模式），则保持 persistLog: true 自动兜底写入。
+  const serverActive = isServerActive()
+  const perfTracker = createPerfTracker({ persistLog: !serverActive })
   const [sidebarRevision, setSidebarRevision] = createSignal(0)
   const [perfRevision, setPerfRevision] = createSignal(0)
   const [allTokenMessages, setAllTokenMessages] = createSignal<TokenMessage[]>([])
