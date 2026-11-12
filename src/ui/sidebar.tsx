@@ -469,6 +469,18 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
           {([key, stat]) => {
             const isExpanded = () => collapse().models[key] !== true
 
+            // 获取该模型专属的性能统计（精准匹配 + modelID 智能兜底）
+            const modelPerf = () => {
+              const models = perfStats().models
+              if (models[key]) return models[key]
+              for (const [k, v] of Object.entries(models)) {
+                if (k === key || k.endsWith("/" + stat.modelID) || key.endsWith("/" + k)) {
+                  return v
+                }
+              }
+              return undefined
+            }
+
             const hitDenom = stat.totalInput + stat.cacheRead
             const hitRate = hitDenom > 0 ? (stat.cacheRead / hitDenom) * 100 : 0
 
@@ -604,12 +616,12 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                         : null}
                     </text>
 
-                    {/* ~TTFT 为请求算术均值；~TPS 为 Σ(output+reasoning)/Σ活跃耗时，非单时速率均值 */}
-                    <Show when={config().sidebar.showPerformance && !!perfStats().models[key]}>
+                    {/* ~TTFT 为请求算术均值；~TPS 为该模型专属的 Σ(output+reasoning)/Σ活跃耗时 */}
+                    <Show when={config().sidebar.showPerformance}>
                       <text fg={mutedColor()} marginTop={1}>
-                        ~{t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(perfStats().models[key]?.avgTTFT ?? null)}</span>
+                        ~{t("ttft")} <span style={{ fg: primaryColor() } as any}>{formatDuration(modelPerf()?.avgTTFT ?? null)}</span>
                         {"    "}
-                        ~{t("tps")} <span style={{ fg: primaryColor() } as any}>{perfStats().models[key]?.avgTPS?.toFixed(1) ?? "—"}</span>
+                        ~{t("tps")} <span style={{ fg: primaryColor() } as any}>{modelPerf()?.avgTPS != null ? Number(modelPerf()?.avgTPS).toFixed(1) : "—"}</span>
                       </text>
                     </Show>
 
