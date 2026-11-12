@@ -491,11 +491,13 @@ export interface HtmlReportMeta {
 }
 
 export interface CombinedReportData {
+  filters?: UsageFilters
   summary: SessionTokenData
   models: ModelBreakdownItem[]
   providers: ProviderBreakdownItem[]
   daily: DailyBreakdownItem[]
   sessions: SessionBreakdownItem[]
+  errors?: ErrorStats
   perfLogs: LogEntry[]
   perfSummary: ModelPerfStats[]
   meta: HtmlReportMeta

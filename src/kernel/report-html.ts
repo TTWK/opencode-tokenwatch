@@ -38,15 +38,20 @@ function sortModelsByUsage(models: ModelBreakdownItem[]): ModelBreakdownItem[] {
 
 function renderMeta(data: CombinedReportData): string {
   const m = data.meta
-  return `TokenWatch Usage Report · ${m.dateRange.start} → ${m.dateRange.end} · generated ${m.generatedAt}`
+  const rangeStr = (m.dateRange.start === m.dateRange.end)
+    ? m.dateRange.start
+    : `${m.dateRange.start} → ${m.dateRange.end}`
+  return `TokenWatch Usage Report · ${rangeStr} · generated ${m.generatedAt}`
 }
 
 function renderKpiCards(data: CombinedReportData): string {
   const s = data.summary
   const hitRate = cacheHitRate(s.inputTokens, s.cacheRead)
   const hitRatePct = fmtPercent(hitRate)
+  const activeModelKeys = new Set(data.models.map(m => `${m.provider}/${m.model}`))
   let tpsTokens = 0, tpsMs = 0;
   for (const p of data.perfSummary) {
+    if (!activeModelKeys.has(p.model)) continue
     // 跨模型仍按 provider 活跃耗时加权，不能按请求数平均各模型速率
     tpsTokens += p.totalTpsTokens ?? 0
     tpsMs += p.totalTpsMs ?? 0
@@ -55,8 +60,9 @@ function renderKpiCards(data: CombinedReportData): string {
   const avgTps = tpsMs > 0 ? avgTpsRaw.toFixed(1) : '—'
   const isHighCache = hitRate >= 0.5
 
-  const errors = (data as any).errors as { errorRate: number; failedCount: number } | undefined
-  const errorRatePct = errors ? (errors.errorRate * 100).toFixed(1) + '%' : '—'
+  const errors = data.errors
+  const errorRatePct = errors && (errors.successCount + errors.failedCount > 0)
+    ? (errors.errorRate * 100).toFixed(1) + '%' : '—'
   const errorColor = errors && errors.errorRate >= 0.05 ? 'var(--output)'
     : errors && errors.errorRate > 0 ? 'var(--tps)' : 'var(--cache)'
 
@@ -90,7 +96,7 @@ function renderKpiCards(data: CombinedReportData): string {
 }
 
 function renderModelChartInit(data: CombinedReportData): string {
-  const models = sortModelsByUsage(data.models).filter(m => m.totalTokens >= 1_000_000)
+  const models = sortModelsByUsage(data.models).slice(0, 15)
   const names = models.map(m => m.model)
   const inputData = models.map(m => m.inputTokens)
   const outputData = models.map(m => m.outputTokens)
@@ -237,10 +243,14 @@ function renderModelChart(chart) {
 }
 
 function renderScatterChartInit(data: CombinedReportData): string {
-  // 过滤掉全零无效条目：无请求或无任何 token 的模型
+  const activeModelKeys = new Set(data.models.map(m => `${m.provider}/${m.model}`))
+  const modelMap = new Map(data.models.map(m => [`${m.provider}/${m.model}`, m]))
+
+  // 严格限定在当前活跃模型，过滤掉全零无效条目
   const validPerf = data.perfSummary.filter(p =>
-    p.requestCount > 0 &&
-    (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
+    activeModelKeys.has(p.model) &&
+    (p.requestCount > 0 || (modelMap.get(p.model)?.requests ?? 0) > 0) &&
+    (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite > 0 || (modelMap.get(p.model)?.totalTokens ?? 0) > 0)
   )
   if (validPerf.length === 0) return ""
 
@@ -256,11 +266,24 @@ function renderScatterChartInit(data: CombinedReportData): string {
   const tpsValues = sorted.map(p => p.avgTPS ?? 0)
   const ttftValues = sorted.map(p => p.avgTTFT ?? 0)
   const costValues = sorted.map(p => {
+    const m = modelMap.get(p.model)
+    if (m && m.totalTokens > 0) {
+      return (m.totalCost / m.totalTokens) * 1000
+    }
     const billable = p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite
     return billable > 0 ? (p.totalCost / billable) * 1000 : 0
   })
-  const hitRates = sorted.map(p => p.cacheHitRate ?? 0)
-  const reqCounts = sorted.map(p => p.requestCount)
+  const hitRates = sorted.map(p => {
+    const m = modelMap.get(p.model)
+    if (m && (m.inputTokens + m.cacheRead) > 0) {
+      return (m.cacheRead / (m.inputTokens + m.cacheRead)) * 100
+    }
+    return p.cacheHitRate ?? 0
+  })
+  const reqCounts = sorted.map(p => {
+    const m = modelMap.get(p.model)
+    return m ? m.requests : p.requestCount
+  })
 
   return `
 var effNames = ${jsonLit(names)};
@@ -361,10 +384,11 @@ function renderProviderCards(data: CombinedReportData): string {
   const sorted = [...data.providers].sort((a, b) => b.totalTokens - a.totalTokens)
   const top = sorted.slice(0, 10)
   const remaining = sorted.length - 10
+  const activeModelKeys = new Set(data.models.map(m => `${m.provider}/${m.model}`))
 
   const cards = top.map(p => {
     const modelCount = data.models.filter(m => m.provider === p.provider).length
-    const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider)
+    const perfItems = data.perfSummary.filter(ps => ps.providerID === p.provider && activeModelKeys.has(ps.model))
     let ttftSum = 0, ttftReqs = 0;
     for (const x of perfItems) {
       // 按"有 TTFT 样本的请求数"加权（同 KPI 卡口径）
@@ -409,6 +433,8 @@ function renderProviderCards(data: CombinedReportData): string {
  * Tab 3: Failed Requests  — 失败请求明细（无数据时不显示此 Tab）
  */
 function renderModelAnalyticsSection(data: CombinedReportData): string {
+  const activeModelKeys = new Set(data.models.map(m => `${m.provider}/${m.model}`))
+
   // ─── Tab 1: Usage Breakdown ───────────────────────────────────────────────
   const usageRows = sortModelsByUsage(data.models).map(m => {
     const hitRate = cacheHitRate(m.inputTokens, m.cacheRead)
@@ -435,6 +461,7 @@ function renderModelAnalyticsSection(data: CombinedReportData): string {
 
   // ─── Tab 2: Latency Percentiles ───────────────────────────────────────────
   const validPerf = data.perfSummary.filter(p =>
+    activeModelKeys.has(p.model) &&
     p.requestCount > 0 &&
     (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
   )
@@ -458,10 +485,7 @@ function renderModelAnalyticsSection(data: CombinedReportData): string {
   }).join("\n")
 
   // ─── Tab 3: Failed Requests ───────────────────────────────────────────────
-  const errors = (data as any).errors as {
-    successCount: number; failedCount: number; errorRate: number
-    byModel: Array<{ provider: string; model: string; failed: number; total: number }>
-  } | undefined
+  const errors = data.errors
   const hasErrors = !!(errors && errors.failedCount > 0)
 
   let errorTabBtn = ''
@@ -707,14 +731,17 @@ function initHeatmapChart() {
 export function generateUsageHtml(data: CombinedReportData): string {
   const metaStr = renderMeta(data)
   const kpiStr = renderKpiCards(data)
-  const modelChartVisible = data.models.filter(m => m.totalTokens >= 1_000_000).length > 0
+  const modelsForChart = sortModelsByUsage(data.models).slice(0, 15)
+  const modelChartVisible = modelsForChart.length > 0
   const modelChartJs = modelChartVisible ? renderModelChartInit(data) : ""
   const scatterChartJs = renderScatterChartInit(data)
   const providerStr = renderProviderCards(data)
   const modelAnalyticsStr = renderModelAnalyticsSection(data)
   const dailyChartJs = renderDailyTrendInit(data)
   const heatmapJs = renderHeatmapInit(data)
+  const activeModelKeys = new Set(data.models.map(m => `${m.provider}/${m.model}`))
   const hasPerf = data.perfSummary.some(p =>
+    activeModelKeys.has(p.model) &&
     p.requestCount > 0 &&
     (p.totalInput + p.totalOutput + p.totalCacheRead + p.totalCacheWrite) > 0
   )
@@ -902,7 +929,7 @@ export function generateUsageHtml(data: CombinedReportData): string {
 
   <div class="section">
     <div class="section-title">Model Comparison Matrix</div>
-    ${modelChartVisible ? '<div class="chart-box" id="model-chart"></div>' : '<div class="empty-state">No models with &ge;1M tokens in this period.</div>'}
+    ${modelChartVisible ? '<div class="chart-box" id="model-chart"></div>' : '<div class="empty-state">No token usage recorded in this period.</div>'}
   </div>
 
   <div class="section">

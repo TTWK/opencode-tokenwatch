@@ -9,8 +9,7 @@ import { homedir } from "node:os"
 import { spawn } from "node:child_process"
 import type { CombinedReportData, HtmlReportMeta, UsageFilters, UsageReport } from "./format.js"
 import { generateUsageHtml } from "./report-html.js"
-import { readPersistedStats } from "./store.js"
-import { readLogs } from "./perf.js"
+import { readLogs, getWindowPerfStats } from "./perf.js"
 
 /** 本地时区 YYYY-MM-DD（toISOString 按 UTC，跨时区会偏一天）—— 全项目统一日期出口 */
 export function localDateStr(d: Date): string {
@@ -89,24 +88,61 @@ function nowStamp(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
 }
 
+function localDayOfTs(ts: string | number): string {
+  const d = new Date(ts)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
 /**
  * 装配完整报告数据。
  *
  * `usage` 由宿主数据源提供（v1 走 SQL、v2 走客户端遍历），
  * 其余全部来自内核，因此两代宿主产出的报告结构完全一致。
  */
-export function buildCombinedData(usage: Omit<UsageReport, "filters">): CombinedReportData {
-  // perfLogs: 仅用于 JSON 导出参考，保持适当窗口即可
-  const logs = readLogs(200)
-  // perfSummary: 持久化聚合统计，覆盖插件安装以来的全量历史，不受 JSONL 轮转影响
-  const perfSummary = readPersistedStats()
+export function buildCombinedData(usage: UsageReport): CombinedReportData {
+  const activeModels = new Set(usage.models.map((m) => `${m.provider}/${m.model}`))
+  const perfSummary = getWindowPerfStats(usage.filters ?? {}, activeModels)
+
+  // perfLogs: 仅用于 JSON 导出参考，严格按当前窗口与活跃模型过滤，避免历史日志泄漏
+  const rawLogs = readLogs(500)
+  const hasFilter = !!(
+    usage.filters?.startDate ||
+    usage.filters?.endDate ||
+    usage.filters?.sessionId ||
+    usage.filters?.model ||
+    usage.filters?.provider
+  )
+  const logs = hasFilter
+    ? rawLogs.filter((entry) => {
+        if (usage.filters?.sessionId && entry.sessionID !== usage.filters.sessionId) return false
+        if (usage.filters?.provider && entry.providerID !== usage.filters.provider) return false
+        if (usage.filters?.model && entry.modelID !== usage.filters.model) return false
+        if (activeModels.size > 0 && !activeModels.has(entry.model)) return false
+        const day = localDayOfTs(entry.ts)
+        if (usage.filters?.startDate && day < usage.filters.startDate) return false
+        if (usage.filters?.endDate && day > usage.filters.endDate) return false
+        return true
+      })
+    : rawLogs
 
   const daily = usage.daily ?? []
+  let startDate = usage.filters?.startDate
+  let endDate = usage.filters?.endDate
+  if (!startDate) {
+    startDate = daily.length > 0 ? daily[daily.length - 1].day : "—"
+  }
+  if (!endDate) {
+    endDate = daily.length > 0 ? daily[0].day : "—"
+  }
+
   const meta: HtmlReportMeta = {
     generatedAt: nowStamp(),
     dateRange: {
-      start: daily.length > 0 ? daily[daily.length - 1].day : "—",
-      end: daily.length > 0 ? daily[0].day : "—",
+      start: startDate,
+      end: endDate,
     },
   }
 

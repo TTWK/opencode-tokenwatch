@@ -22,29 +22,26 @@ import type {
 } from "../../kernel/format.js"
 import { t } from "../../kernel/i18n.js"
 
-interface MutableSession {
+export interface AssistantMessageRecord {
   sessionId: string
-  title: string
+  sessionTitle: string
+  day: string
+  timeCreated: number
   provider: string
   model: string
-  requests: number
-  totalTokens: number
-  inputTokens: number
-  outputTokens: number
-  reasoningTokens: number
+  total: number
+  input: number
+  output: number
+  reasoning: number
   cacheRead: number
   cacheWrite: number
-  totalCost: number
-  day: string
+  cost: number
+  isFailure: boolean
 }
 
 interface Snapshot {
   builtAt: number
-  sessions: MutableSession[]
-  models: ModelBreakdownItem[]
-  providers: ProviderBreakdownItem[]
-  daily: DailyBreakdownItem[]
-  errors: ErrorStats
+  records: AssistantMessageRecord[]
 }
 
 /** 同一 TUI 进程内复用扫描结果，避免每次打开报告都全量重算 */
@@ -145,18 +142,7 @@ function isAssistantMessage(message: any): boolean {
 }
 
 async function scan(ctx: any): Promise<Snapshot> {
-  const sessionAgg = new Map<string, MutableSession>()
-  const modelAgg = new Map<string, ModelBreakdownItem>()
-  const providerAgg = new Map<string, ProviderBreakdownItem>()
-  const dailyAgg = new Map<string, DailyBreakdownItem>()
-  const modelSessions = new Map<string, Set<string>>()
-  const providerSessions = new Map<string, Set<string>>()
-  const dailySessions = new Map<string, Set<string>>()
-
-  const errorByModel = new Map<string, { provider: string; model: string; failed: number; total: number }>()
-  let successCount = 0
-  let failedCount = 0
-
+  const records: AssistantMessageRecord[] = []
   const { sessions, truncated: sessionsTruncated } = await listAllSessions(ctx)
   let skippedSessions = 0
   let truncatedMessageSessions = 0
@@ -175,7 +161,8 @@ async function scan(ctx: any): Promise<Snapshot> {
       skippedSessions++
       continue
     }
-    let sawAssistant = false
+
+    const sessionTitle = session?.title ?? "(untitled)"
 
     for (const message of messages) {
       if (!isAssistantMessage(message)) continue
@@ -191,113 +178,28 @@ async function scan(ctx: any): Promise<Snapshot> {
       const cost = typeof message?.cost === "number" ? message.cost : 0
       const provider = message?.model?.providerID ?? "unknown"
       const model = message?.model?.id ?? "unknown"
-      const day = dayOf(message?.time?.created ?? session?.time?.created ?? Date.now())
+      const timeCreated = message?.time?.created ?? session?.time?.created ?? Date.now()
+      const day = dayOf(timeCreated)
 
       // v2 用 finish === "error" 判定失败，比 v1 的 tokens.total === 0 启发式更准确
       const isFailure = message?.finish === "error" || total === 0
-      const modelKey = `${provider}/${model}`
-      const err = errorByModel.get(modelKey) ?? { provider, model, failed: 0, total: 0 }
-      err.total++
-      if (isFailure) {
-        err.failed++
-        failedCount++
-      } else {
-        successCount++
-      }
-      errorByModel.set(modelKey, err)
 
-      // 失败请求不计入用量统计（与 v1 SQL 过滤条件一致）
-      if (isFailure) continue
-      sawAssistant = true
-
-      // session 维度
-      let s = sessionAgg.get(sessionID)
-      if (!s) {
-        s = {
-          sessionId: sessionID,
-          title: session?.title ?? "",
-          provider,
-          model,
-          requests: 0,
-          totalTokens: 0, inputTokens: 0, outputTokens: 0,
-          reasoningTokens: 0, cacheRead: 0, cacheWrite: 0,
-          totalCost: 0,
-          day,
-        }
-        sessionAgg.set(sessionID, s)
-      }
-      s.requests++
-      s.totalTokens += total
-      s.inputTokens += input
-      s.outputTokens += output
-      s.reasoningTokens += reasoning
-      s.cacheRead += cacheRead
-      s.cacheWrite += cacheWrite
-      s.totalCost += cost
-      if (!s.provider || s.provider === "unknown") s.provider = provider
-      if (!s.model || s.model === "unknown") s.model = model
-
-      // model 维度
-      let m = modelAgg.get(modelKey)
-      if (!m) {
-        m = {
-          provider, model, requests: 0, sessions: 0,
-          totalTokens: 0, inputTokens: 0, outputTokens: 0,
-          reasoningTokens: 0, cacheRead: 0, totalCost: 0,
-        }
-        modelAgg.set(modelKey, m)
-      }
-      m.requests++
-      m.totalTokens += total
-      m.inputTokens += input
-      m.outputTokens += output
-      m.reasoningTokens += reasoning
-      m.cacheRead += cacheRead
-      m.totalCost += cost
-      ;(modelSessions.get(modelKey) ?? modelSessions.set(modelKey, new Set()).get(modelKey)!).add(sessionID)
-
-      // provider 维度
-      let p = providerAgg.get(provider)
-      if (!p) {
-        p = {
-          provider, requests: 0, sessions: 0,
-          totalTokens: 0, inputTokens: 0, outputTokens: 0,
-          reasoningTokens: 0, cacheRead: 0, totalCost: 0,
-        }
-        providerAgg.set(provider, p)
-      }
-      p.requests++
-      p.totalTokens += total
-      p.inputTokens += input
-      p.outputTokens += output
-      p.reasoningTokens += reasoning
-      p.cacheRead += cacheRead
-      p.totalCost += cost
-      ;(providerSessions.get(provider) ?? providerSessions.set(provider, new Set()).get(provider)!).add(sessionID)
-
-      // daily 维度
-      let d = dailyAgg.get(day)
-      if (!d) {
-        d = {
-          day, requests: 0, sessions: 0,
-          totalTokens: 0, inputTokens: 0, outputTokens: 0,
-          reasoningTokens: 0, cacheRead: 0, totalCost: 0,
-        }
-        dailyAgg.set(day, d)
-      }
-      d.requests++
-      d.totalTokens += total
-      d.inputTokens += input
-      d.outputTokens += output
-      d.reasoningTokens += reasoning
-      d.cacheRead += cacheRead
-      d.totalCost += cost
-      ;(dailySessions.get(day) ?? dailySessions.set(day, new Set()).get(day)!).add(sessionID)
-    }
-
-    if (!sawAssistant && session?.id) {
-      // 没有 assistant 消息的会话不进入 sessions 列表，避免空行
-      sessionAgg.delete(sessionID)
+      records.push({
+        sessionId: sessionID,
+        sessionTitle,
+        day,
+        timeCreated,
+        provider,
+        model,
+        total,
+        input,
+        output,
+        reasoning,
+        cacheRead,
+        cacheWrite,
+        cost,
+        isFailure,
+      })
     }
 
     await yieldToEventLoop()
@@ -321,6 +223,184 @@ async function scan(ctx: any): Promise<Snapshot> {
     warn(t("noticeScanTruncatedMessages").replace("{n}", String(truncatedMessageSessions)))
   }
 
+  return {
+    builtAt: Date.now(),
+    records,
+  }
+}
+
+/**
+ * 根据过滤条件实时装配用量报告。
+ *
+ * 保证所有维度（summary / models / providers / daily / sessions / errors）
+ * 均基于同一批满足 filters 条件的消息精准聚合，绝对内部自洽。
+ */
+function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
+  const matchedRecords = snapshot.records.filter((r) => {
+    if (filters.sessionId && r.sessionId !== filters.sessionId) return false
+    if (!matchesDay(r.day, filters)) return false
+    if (!matchesModel(r.provider, r.model, filters)) return false
+    return true
+  })
+
+  // 1. 错误统计（包含成功与失败请求）
+  let successCount = 0
+  let failedCount = 0
+  const errorByModel = new Map<string, { provider: string; model: string; failed: number; total: number }>()
+
+  for (const r of matchedRecords) {
+    const modelKey = `${r.provider}/${r.model}`
+    let err = errorByModel.get(modelKey)
+    if (!err) {
+      err = { provider: r.provider, model: r.model, failed: 0, total: 0 }
+      errorByModel.set(modelKey, err)
+    }
+    err.total++
+    if (r.isFailure) {
+      err.failed++
+      failedCount++
+    } else {
+      successCount++
+    }
+  }
+
+  // 2. 有效用量统计（过滤掉失败请求，与 v1 SQL 口径一致）
+  const successRecords = matchedRecords.filter((r) => !r.isFailure)
+
+  const sessionAgg = new Map<string, SessionBreakdownItem>()
+  const modelAgg = new Map<string, ModelBreakdownItem>()
+  const providerAgg = new Map<string, ProviderBreakdownItem>()
+  const dailyAgg = new Map<string, DailyBreakdownItem>()
+
+  const modelSessions = new Map<string, Set<string>>()
+  const providerSessions = new Map<string, Set<string>>()
+  const dailySessions = new Map<string, Set<string>>()
+
+  let summaryTotalTokens = 0
+  let summaryInputTokens = 0
+  let summaryOutputTokens = 0
+  let summaryReasoningTokens = 0
+  let summaryCacheRead = 0
+  let summaryCacheWrite = 0
+  let summaryTotalCost = 0
+  let summaryRequestCount = 0
+
+  for (const r of successRecords) {
+    summaryTotalTokens += r.total
+    summaryInputTokens += r.input
+    summaryOutputTokens += r.output
+    summaryReasoningTokens += r.reasoning
+    summaryCacheRead += r.cacheRead
+    summaryCacheWrite += r.cacheWrite
+    summaryTotalCost += r.cost
+    summaryRequestCount++
+
+    // Session 维度
+    let s = sessionAgg.get(r.sessionId)
+    if (!s) {
+      s = {
+        sessionId: r.sessionId,
+        title: r.sessionTitle,
+        provider: r.provider,
+        model: r.model,
+        requests: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheRead: 0,
+        totalCost: 0,
+        day: r.day,
+      }
+      sessionAgg.set(r.sessionId, s)
+    }
+    s.requests++
+    s.totalTokens += r.total
+    s.inputTokens += r.input
+    s.outputTokens += r.output
+    s.reasoningTokens += r.reasoning
+    s.cacheRead += r.cacheRead
+    s.totalCost += r.cost
+    if (r.day > s.day) s.day = r.day
+
+    // Model 维度
+    const modelKey = `${r.provider}/${r.model}`
+    let m = modelAgg.get(modelKey)
+    if (!m) {
+      m = {
+        provider: r.provider,
+        model: r.model,
+        requests: 0,
+        sessions: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheRead: 0,
+        totalCost: 0,
+      }
+      modelAgg.set(modelKey, m)
+    }
+    m.requests++
+    m.totalTokens += r.total
+    m.inputTokens += r.input
+    m.outputTokens += r.output
+    m.reasoningTokens += r.reasoning
+    m.cacheRead += r.cacheRead
+    m.totalCost += r.cost
+    ;(modelSessions.get(modelKey) ?? modelSessions.set(modelKey, new Set()).get(modelKey)!).add(r.sessionId)
+
+    // Provider 维度
+    let p = providerAgg.get(r.provider)
+    if (!p) {
+      p = {
+        provider: r.provider,
+        requests: 0,
+        sessions: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheRead: 0,
+        totalCost: 0,
+      }
+      providerAgg.set(r.provider, p)
+    }
+    p.requests++
+    p.totalTokens += r.total
+    p.inputTokens += r.input
+    p.outputTokens += r.output
+    p.reasoningTokens += r.reasoning
+    p.cacheRead += r.cacheRead
+    p.totalCost += r.cost
+    ;(providerSessions.get(r.provider) ?? providerSessions.set(r.provider, new Set()).get(r.provider)!).add(r.sessionId)
+
+    // Daily 维度
+    let d = dailyAgg.get(r.day)
+    if (!d) {
+      d = {
+        day: r.day,
+        requests: 0,
+        sessions: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheRead: 0,
+        totalCost: 0,
+      }
+      dailyAgg.set(r.day, d)
+    }
+    d.requests++
+    d.totalTokens += r.total
+    d.inputTokens += r.input
+    d.outputTokens += r.output
+    d.reasoningTokens += r.reasoning
+    d.cacheRead += r.cacheRead
+    d.totalCost += r.cost
+    ;(dailySessions.get(r.day) ?? dailySessions.set(r.day, new Set()).get(r.day)!).add(r.sessionId)
+  }
+
   for (const [key, set] of modelSessions) {
     const m = modelAgg.get(key)
     if (m) m.sessions = set.size
@@ -334,48 +414,46 @@ async function scan(ctx: any): Promise<Snapshot> {
     if (d) d.sessions = set.size
   }
 
-  return {
-    builtAt: Date.now(),
-    sessions: Array.from(sessionAgg.values()).sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0)),
-    models: Array.from(modelAgg.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-    providers: Array.from(providerAgg.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-    daily: Array.from(dailyAgg.values()).sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0)),
-    errors: {
-      successCount,
-      failedCount,
-      // 小数口径（0~1），与 v1 的 getErrorStats 及 HTML 报告的消费方一致
-      errorRate: successCount + failedCount > 0 ? failedCount / (successCount + failedCount) : 0,
-      byModel: Array.from(errorByModel.values()),
-    },
-  }
-}
+  const models = Array.from(modelAgg.values()).sort((a, b) => b.totalTokens - a.totalTokens)
+  const providers = Array.from(providerAgg.values()).sort((a, b) => b.totalTokens - a.totalTokens)
+  const daily = Array.from(dailyAgg.values()).sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
+  const rawSessions = Array.from(sessionAgg.values()).sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
 
-function summarize(input: {
-  sessions: MutableSession[]
-  models: ModelBreakdownItem[]
-}): SessionTokenData {
-  let totalTokens = 0, inputTokens = 0, outputTokens = 0, reasoningTokens = 0
-  let cacheRead = 0, cacheWrite = 0, totalCost = 0, requestCount = 0
+  const modelsUsed = models.map((m) => `${m.provider}/${m.model}`)
 
-  for (const s of input.sessions) {
-    totalTokens += s.totalTokens
-    inputTokens += s.inputTokens
-    outputTokens += s.outputTokens
-    reasoningTokens += s.reasoningTokens
-    cacheRead += s.cacheRead
-    cacheWrite += s.cacheWrite
-    totalCost += s.totalCost
-    requestCount += s.requests
-  }
-
-  const modelsUsed = input.models.map((m) => `${m.provider}/${m.model}`)
-
-  return {
-    model: input.sessions[0]?.model ?? "",
-    provider: input.sessions[0]?.provider ?? "",
+  const summary: SessionTokenData = {
+    model: models[0]?.model ?? "",
+    provider: models[0]?.provider ?? "",
     modelsUsed,
-    totalTokens, inputTokens, outputTokens, reasoningTokens,
-    cacheRead, cacheWrite, totalCost, requestCount,
+    totalTokens: summaryTotalTokens,
+    inputTokens: summaryInputTokens,
+    outputTokens: summaryOutputTokens,
+    reasoningTokens: summaryReasoningTokens,
+    cacheRead: summaryCacheRead,
+    cacheWrite: summaryCacheWrite,
+    totalCost: summaryTotalCost,
+    requestCount: summaryRequestCount,
+  }
+
+  const errors: ErrorStats = {
+    successCount,
+    failedCount,
+    errorRate: successCount + failedCount > 0 ? failedCount / (successCount + failedCount) : 0,
+    byModel: Array.from(errorByModel.values()),
+  }
+
+  const dailyLimit = filters.limit ?? 365
+  const truncatedDaily = daily.slice(0, dailyLimit)
+
+  return {
+    filters,
+    summary,
+    models,
+    providers,
+    daily: truncatedDaily,
+    sessions: rawSessions.slice(0, 15),
+    errors,
+    dailyTruncated: daily.length > dailyLimit,
   }
 }
 
@@ -399,40 +477,6 @@ function startScan(ctx: any): Promise<Snapshot> {
   p.catch(() => { /* 后台重建路径不 await，吞掉拒绝避免未处理告警 */ })
   inflight = p
   return p
-}
-
-function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
-  const sessions = snapshot.sessions.filter(
-    (s) => matchesDay(s.day, filters) && matchesModel(s.provider, s.model, filters),
-  )
-  // 注意：session 级 model/provider 过滤用的是该会话"首个非 unknown"的主模型，
-  // 多模型会话无法按单个模型精确切分 —— 与 v1 SQL 的逐消息过滤语义近似但不完全等价
-  const models = snapshot.models.filter((m) => matchesModel(m.provider, m.model, filters))
-  const providers = snapshot.providers.filter((p) => !filters.provider || p.provider === filters.provider)
-  const daily = snapshot.daily.filter((d) => matchesDay(d.day, filters))
-
-  return {
-    filters,
-    summary: summarize({ sessions, models }),
-    models,
-    providers,
-    daily,
-    sessions: sessions.map((s) => ({
-      sessionId: s.sessionId,
-      title: s.title,
-      provider: s.provider,
-      model: s.model,
-      requests: s.requests,
-      totalTokens: s.totalTokens,
-      inputTokens: s.inputTokens,
-      outputTokens: s.outputTokens,
-      reasoningTokens: s.reasoningTokens,
-      cacheRead: s.cacheRead,
-      totalCost: s.totalCost,
-      day: s.day,
-    })) satisfies SessionBreakdownItem[],
-    errors: snapshot.errors,
-  }
 }
 
 /**

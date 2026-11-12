@@ -1,10 +1,10 @@
-import type { LogEntry, ModelPerfStats, SessionPerfStats } from "./format.js"
+import type { LogEntry, ModelPerfStats, SessionPerfStats, UsageFilters } from "./format.js"
 import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
 import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { updatePersistedStats } from "./store.js"
+import { readPersistedStats, updatePersistedStats } from "./store.js"
 
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
 /** rename 轮转后的上一代日志（保存更早历史，stats 迁移会一并读取） */
@@ -321,4 +321,86 @@ export type { PartEvent, PerfTracker }
 export function readLogs(last: number = 50): LogEntry[] {
   const tracker = new PerfTracker()
   return tracker.readLogs(last)
+}
+
+function localDayFromTs(ts: string | number): string {
+  const d = new Date(ts)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * 按窗口与过滤条件聚合性能指标。
+ *
+ * 优先从 tokenwatch.jsonl（含 .1）中重放符合日期/模型窗口的日志；
+ * 若某活跃模型未被日志覆盖（如早期日志轮转淘汰），自动回退至持久化 stats。
+ * 若指定了 activeModels，最终结果严格限制在活跃模型集合内，彻底杜绝历史无关模型泄漏。
+ */
+export function getWindowPerfStats(filters: UsageFilters = {}, activeModels?: Set<string>): ModelPerfStats[] {
+  const hasFilter = !!(filters.startDate || filters.endDate || filters.sessionId || filters.model || filters.provider)
+  const persisted = readPersistedStats()
+
+  if (activeModels && activeModels.size === 0) {
+    return []
+  }
+
+  const files = [LOG_PATH_ROTATED, LOG_PATH].filter(existsSync)
+  if (files.length === 0 || !hasFilter) {
+    return activeModels
+      ? persisted.filter((p) => activeModels.has(p.model))
+      : persisted
+  }
+
+  const map = new Map<string, ModelAccumulator>()
+  for (const filePath of files) {
+    try {
+      const content = readFileSync(filePath, "utf-8").trim()
+      if (!content) continue
+      for (const line of content.split("\n")) {
+        if (!line) continue
+        try {
+          const entry = JSON.parse(line) as LogEntry
+          if (activeModels && !activeModels.has(entry.model)) continue
+          if (filters.sessionId && entry.sessionID !== filters.sessionId) continue
+          if (filters.provider && entry.providerID !== filters.provider) continue
+          if (filters.model && entry.modelID !== filters.model) continue
+
+          const day = localDayFromTs(entry.ts)
+          if (filters.startDate && day < filters.startDate) continue
+          if (filters.endDate && day > filters.endDate) continue
+
+          let acc = map.get(entry.model)
+          if (!acc) {
+            acc = createAccumulator(entry.model, entry.providerID)
+            map.set(entry.model, acc)
+          }
+          accumulateEntry(acc, entry)
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } catch {
+      // ignore read error
+    }
+  }
+
+  const result: ModelPerfStats[] = []
+  const covered = new Set<string>()
+
+  for (const [model, acc] of map) {
+    result.push(finalizeAccumulator(acc))
+    covered.add(model)
+  }
+
+  if (activeModels) {
+    for (const p of persisted) {
+      if (activeModels.has(p.model) && !covered.has(p.model)) {
+        result.push(p)
+      }
+    }
+  }
+
+  return result
 }
