@@ -221,11 +221,20 @@ const plugin: PluginModule & {
       const events = [
         "message.updated",
         "message.part.updated",
+        "message.part.delta",
         "message.removed",
         "session.step.started",
+        "session.next.step.started",
         "session.step.ended",
+        "session.next.step.ended",
         "session.text.started",
+        "session.next.text.started",
+        "session.text.delta",
+        "session.next.text.delta",
         "session.reasoning.started",
+        "session.next.reasoning.started",
+        "session.reasoning.delta",
+        "session.next.reasoning.delta",
       ]
       for (const ev of events) {
         try {
@@ -251,4 +260,5 @@ const plugin: PluginModule & {
 
 export { isServerActive } from "./kernel/server-state.js"
 export { createPerfTracker } from "./kernel/perf.js"
+export { readPersistedStats } from "./kernel/store.js"
 export default plugin

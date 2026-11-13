@@ -99,6 +99,30 @@ function mergeMessages(existing: readonly TokenMessage[], incoming: readonly Tok
   return Array.from(map.values())
 }
 
+/** 比较两个消息列表的内容是否完全一致（用于精准守卫避免冗余更新，且不错漏 Token 变化） */
+function areMessagesEqual(a: readonly TokenMessage[], b: readonly TokenMessage[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const ma = a[i]
+    const mb = b[i]
+    if (ma.id !== mb.id) return false
+    if (
+      ma.inputTokens !== mb.inputTokens ||
+      ma.outputTokens !== mb.outputTokens ||
+      ma.reasoningTokens !== mb.reasoningTokens ||
+      ma.cacheRead !== mb.cacheRead ||
+      ma.cacheWrite !== mb.cacheWrite ||
+      ma.cost !== mb.cost ||
+      ma.modelID !== mb.modelID ||
+      ma.providerID !== mb.providerID
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
 /** 消息数组的 KV 写节流窗口：流式期间每条消息更新都会触发，合并为低频落盘 */
 const PERSIST_DEBOUNCE_MS = 500
 /** KV 中保留消息数组缓存的会话数上限（MRU 淘汰，防止 KV 无界膨胀） */
@@ -122,10 +146,9 @@ export function startTokenWatch(host: HostAdapter): () => void {
   let currentSessionID = ""
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  // 写节流状态：burst 内只保留最新负载，定时器到期一次性落盘
+  // 写节流状态：每个会话独立维护 pending payload，burst 内合并低频落盘
+  const pendingPersist = new Map<string, TokenMessage[]>()
   let persistTimer: ReturnType<typeof setTimeout> | null = null
-  let persistSession = ""
-  let persistMsgs: TokenMessage[] = []
 
   const persistNow = (sessionID: string, msgs: TokenMessage[]): void => {
     try {
@@ -133,36 +156,41 @@ export function startTokenWatch(host: HostAdapter): () => void {
     } catch { /* non-critical */ }
   }
 
-  /** 尾沿节流：burst 开始后 ≤500ms 必写一次，期间连续更新只保留最后一份 */
-  const persistThrottled = (sessionID: string, msgs: TokenMessage[]): void => {
-    persistSession = sessionID
-    persistMsgs = msgs
-    if (persistTimer) return
-    persistTimer = setTimeout(() => {
-      persistTimer = null
-      persistNow(persistSession, persistMsgs)
-    }, PERSIST_DEBOUNCE_MS)
-  }
-
   const flushPersist = (): void => {
     if (persistTimer) {
       clearTimeout(persistTimer)
       persistTimer = null
     }
-    if (persistMsgs.length > 0) persistNow(persistSession, persistMsgs)
+    for (const [sid, msgs] of pendingPersist) {
+      persistNow(sid, msgs)
+    }
+    pendingPersist.clear()
   }
 
-  /** 维护会话 MRU 索引并淘汰超出上限的 KV 条目（宿主无 delete 时优雅降级为仅索引封顶） */
+  /** 尾沿节流：burst 开始后 ≤500ms 必写一次，期间连续更新只保留最后一份 */
+  const persistThrottled = (sessionID: string, msgs: TokenMessage[]): void => {
+    if (!sessionID) return
+    pendingPersist.set(sessionID, msgs)
+    if (persistTimer) return
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      for (const [sid, msgs] of pendingPersist) {
+        persistNow(sid, msgs)
+      }
+      pendingPersist.clear()
+    }, PERSIST_DEBOUNCE_MS)
+  }
+
+  /** 维护会话 MRU 索引并淘汰超出上限的 KV 条目（修复 off-by-one，精确淘汰不在新索引中的旧会话） */
   const evictOldSessions = (sessionID: string): void => {
     try {
       const index = host.store.get<string[]>(SESSION_INDEX_KEY, []).filter(Boolean)
       const next = [sessionID, ...index.filter((id) => id !== sessionID)].slice(0, KV_SESSION_KEEP)
       host.store.set(SESSION_INDEX_KEY, next)
       if (typeof host.store.delete === "function") {
-        for (const id of index.slice(KV_SESSION_KEEP)) {
-          if (!next.includes(id)) {
-            try { host.store.delete(kvKey(id)) } catch { /* non-critical */ }
-          }
+        const evicted = index.filter((id) => !next.includes(id))
+        for (const id of evicted) {
+          try { host.store.delete(kvKey(id)) } catch { /* non-critical */ }
         }
       }
     } catch { /* non-critical */ }
@@ -211,7 +239,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
         if (rebuilt.length > 0) {
           const current = allTokenMessages()
           const merged = mergeMessages(current, rebuilt)
-          if (merged.length !== current.length) {
+          if (!areMessagesEqual(current, merged)) {
             setAllTokenMessages(merged)
             persistThrottled(sessionID, merged)
           }
@@ -242,11 +270,13 @@ export function startTokenWatch(host: HostAdapter): () => void {
       setPerfRevision((v) => v + 1)
 
       // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）。
-      // 事件处理器是串行的，先读后写不与 updater 副作用混用，保持 setSignal 纯净。
+      // 严格会话边界守卫：非当前前台会话事件绝对不混入当前 allTokenMessages 信号，
+      // 避免跨会话污染与相互覆盖；非当前会话安全更新其自身的持久化缓存。
       if (event.role === "assistant" && event.total > 0) {
+        const targetSessionID = event.sessionID || currentSessionID
         const msg: TokenMessage = {
           id: event.messageID,
-          sessionID: event.sessionID,
+          sessionID: targetSessionID,
           providerID: event.providerID,
           modelID: event.modelID,
           inputTokens: event.input,
@@ -256,14 +286,28 @@ export function startTokenWatch(host: HostAdapter): () => void {
           cacheWrite: event.cacheWrite,
           cost: event.cost,
         }
-        const prev = allTokenMessages()
-        const idx = prev.findIndex((m) => m.id === msg.id)
-        const next = idx >= 0
-          ? prev.map((m, i) => (i === idx ? msg : m))
-          : [...prev, msg]
-        setAllTokenMessages(next)
-        // 优先使用事件自带的 sessionID，避免 slot 渲染时序导致的错存
-        persistThrottled(event.sessionID || currentSessionID, next)
+
+        if (targetSessionID === currentSessionID) {
+          const prev = allTokenMessages()
+          const idx = prev.findIndex((m) => m.id === msg.id)
+          const next = idx >= 0
+            ? prev.map((m, i) => (i === idx ? msg : m))
+            : [...prev, msg]
+          setAllTokenMessages(next)
+          persistThrottled(currentSessionID, next)
+        } else if (targetSessionID) {
+          // 迟到或后台会话事件：不污染当前前台信号，安全独立落盘目标会话
+          try {
+            const saved = pendingPersist.get(targetSessionID)
+              ?? host.store.get<TokenMessage[] | undefined>(kvKey(targetSessionID), undefined)
+              ?? []
+            const idx = saved.findIndex((m) => m.id === msg.id)
+            const next = idx >= 0
+              ? saved.map((m, i) => (i === idx ? msg : m))
+              : [...saved, msg]
+            persistThrottled(targetSessionID, next)
+          } catch { /* non-critical */ }
+        }
       }
 
       setSidebarRevision((v) => v + 1)
@@ -282,7 +326,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
             if (rebuilt.length > 0) {
               const current = allTokenMessages()
               const merged = mergeMessages(current, rebuilt)
-              if (merged.length !== current.length) {
+              if (!areMessagesEqual(current, merged)) {
                 setAllTokenMessages(merged)
                 persistThrottled(currentSessionID, merged)
               }

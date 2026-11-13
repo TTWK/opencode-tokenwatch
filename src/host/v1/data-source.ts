@@ -74,6 +74,7 @@ interface ModelRow {
   output_tokens: number | null
   reasoning_tokens: number | null
   cache_read: number | null
+  cache_write: number | null
   total_cost: number | null
 }
 
@@ -86,6 +87,7 @@ interface ProviderRow {
   output_tokens: number | null
   reasoning_tokens: number | null
   cache_read: number | null
+  cache_write: number | null
   total_cost: number | null
 }
 
@@ -98,6 +100,7 @@ interface DailyRow {
   output_tokens: number | null
   reasoning_tokens: number | null
   cache_read: number | null
+  cache_write: number | null
   total_cost: number | null
 }
 
@@ -112,6 +115,7 @@ interface SessionRow {
   output_tokens: number | null
   reasoning_tokens: number | null
   cache_read: number | null
+  cache_write: number | null
   total_cost: number | null
   day: string | null
 }
@@ -123,7 +127,9 @@ interface DistinctValueRow {
 async function queryDb<T>(sql: string): Promise<T[]> {
   const flatSql = sql.replace(/\s+/g, " ").trim()
   const { stdout, stderr } = await execAsync(`opencode db ${JSON.stringify(flatSql)} --format json`)
-  if (stderr) throw new Error(stderr.trim())
+  if (!stdout.trim()) {
+    throw new Error(stderr.trim() || "Empty output from opencode db")
+  }
   const parsed = JSON.parse(stdout.trim())
   return Array.isArray(parsed) ? parsed : parsed.data ?? []
 }
@@ -243,6 +249,7 @@ SELECT
   sum(coalesce(json_extract(m.data, '$.tokens.output'), 0)) as output_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.cache.read'), 0)) as cache_read,
+  sum(coalesce(json_extract(m.data, '$.tokens.cache.write'), 0)) as cache_write,
   sum(coalesce(json_extract(m.data, '$.cost'), 0)) as total_cost
 FROM message m
 WHERE ${messageWhere(filters)}
@@ -261,6 +268,7 @@ ORDER BY total_tokens DESC
     outputTokens: row.output_tokens ?? 0,
     reasoningTokens: row.reasoning_tokens ?? 0,
     cacheRead: row.cache_read ?? 0,
+    cacheWrite: row.cache_write ?? 0,
     totalCost: row.total_cost ?? 0,
   }))
 }
@@ -276,6 +284,7 @@ SELECT
   sum(coalesce(json_extract(m.data, '$.tokens.output'), 0)) as output_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.cache.read'), 0)) as cache_read,
+  sum(coalesce(json_extract(m.data, '$.tokens.cache.write'), 0)) as cache_write,
   sum(coalesce(json_extract(m.data, '$.cost'), 0)) as total_cost
 FROM message m
 WHERE ${messageWhere(filters)}
@@ -293,6 +302,7 @@ ORDER BY total_tokens DESC
     outputTokens: row.output_tokens ?? 0,
     reasoningTokens: row.reasoning_tokens ?? 0,
     cacheRead: row.cache_read ?? 0,
+    cacheWrite: row.cache_write ?? 0,
     totalCost: row.total_cost ?? 0,
   }))
 }
@@ -311,6 +321,7 @@ SELECT
   sum(coalesce(json_extract(m.data, '$.tokens.output'), 0)) as output_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.cache.read'), 0)) as cache_read,
+  sum(coalesce(json_extract(m.data, '$.tokens.cache.write'), 0)) as cache_write,
   sum(coalesce(json_extract(m.data, '$.cost'), 0)) as total_cost
 FROM message m
 WHERE ${messageWhere(filters)}
@@ -329,6 +340,7 @@ LIMIT ${Math.max(1, limit)}
     outputTokens: row.output_tokens ?? 0,
     reasoningTokens: row.reasoning_tokens ?? 0,
     cacheRead: row.cache_read ?? 0,
+    cacheWrite: row.cache_write ?? 0,
     totalCost: row.total_cost ?? 0,
   }))
 }
@@ -347,6 +359,7 @@ SELECT
   sum(coalesce(json_extract(m.data, '$.tokens.output'), 0)) as output_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
   sum(coalesce(json_extract(m.data, '$.tokens.cache.read'), 0)) as cache_read,
+  sum(coalesce(json_extract(m.data, '$.tokens.cache.write'), 0)) as cache_write,
   sum(coalesce(json_extract(m.data, '$.cost'), 0)) as total_cost,
   date(max(m.time_created) / 1000, 'unixepoch', 'localtime') as day
 FROM message m
@@ -369,6 +382,7 @@ LIMIT ${Math.max(1, limit)}
     outputTokens: row.output_tokens ?? 0,
     reasoningTokens: row.reasoning_tokens ?? 0,
     cacheRead: row.cache_read ?? 0,
+    cacheWrite: row.cache_write ?? 0,
     totalCost: row.total_cost ?? 0,
     day: row.day ?? "",
   }))
@@ -390,13 +404,13 @@ export async function getErrorStats(filters: UsageFilters = {}): Promise<ErrorSt
   }
   const baseWhere = baseConds.join(" AND ")
 
-  // 按模型细化：同时统计成功和失败请求
+  // 按模型细化：同时统计成功和失败请求（真实 finish=error 或 error 不为空或 total=0 计为失败）
   const sql = `
 SELECT
   coalesce(json_extract(m.data, '$.providerID'), 'unknown') as provider,
   coalesce(json_extract(m.data, '$.modelID'), 'unknown') as model,
   count(*) as total,
-  sum(CASE WHEN coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0 THEN 1 ELSE 0 END) as failed
+  sum(CASE WHEN json_extract(m.data, '$.finish') = 'error' OR json_extract(m.data, '$.error') IS NOT NULL OR coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0 THEN 1 ELSE 0 END) as failed
 FROM message m
 WHERE ${baseWhere}
 GROUP BY provider, model

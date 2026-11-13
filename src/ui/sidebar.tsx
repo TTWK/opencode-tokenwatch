@@ -313,8 +313,17 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
     if (realInput > 0) {
       const estimated = (dist.system ?? 0) + (dist.user ?? 0)
         + (dist.toolCall ?? 0) + (dist.toolResult ?? 0)
-      const other = realInput - estimated
-      if (other > 50) dist.other = other
+      if (estimated > realInput) {
+        // 估算值超出真实 input 时按比例收缩，保持各桶总和严格对齐 realInput
+        const scale = realInput / estimated
+        if (dist.system) dist.system = Math.round(dist.system * scale)
+        if (dist.user) dist.user = Math.round(dist.user * scale)
+        if (dist.toolCall) dist.toolCall = Math.round(dist.toolCall * scale)
+        if (dist.toolResult) dist.toolResult = Math.round(dist.toolResult * scale)
+      } else {
+        const other = realInput - estimated
+        if (other > 0) dist.other = other
+      }
     }
 
     return dist
@@ -492,7 +501,9 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
                 const kModel = parts.length > 1 ? parts.slice(1).join("/").toLowerCase() : parts[0].toLowerCase()
                 const kLeaf = parts[parts.length - 1].toLowerCase()
 
-                const isSameProvider = !kProvider || kProvider === "unknown" || expectedProvider === "unknown" || kProvider === expectedProvider
+                // 严格限定同一 Provider，杜绝单方 unknown 跨 Provider 串位匹配
+                const isSameProvider = kProvider === expectedProvider ||
+                  ((!kProvider || kProvider === "unknown") && (!expectedProvider || expectedProvider === "unknown"))
                 if (isSameProvider) {
                   // 同 Provider 下，完整 modelID 相等，或者合法的叶子模型名相等（长度>3防误判）
                   if (kModel === expectedModel || (kLeaf === expectedLeaf && expectedLeaf.length > 3)) {

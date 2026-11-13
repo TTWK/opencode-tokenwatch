@@ -26,6 +26,7 @@ interface StatsFile {
   updatedAt: string
   /** 是否已完成从 JSONL 日志的一次性迁移 */
   migratedFromLogs: boolean
+  recentMessageIDs?: string[]
   models: Record<string, ModelAccumulator>
 }
 
@@ -36,13 +37,16 @@ interface StatsFile {
 function loadStatsFile(): StatsFile {
   try {
     if (!existsSync(STATS_PATH)) {
-      return { version: CURRENT_VERSION, updatedAt: "", migratedFromLogs: false, models: {} }
+      return { version: CURRENT_VERSION, updatedAt: "", migratedFromLogs: false, recentMessageIDs: [], models: {} }
     }
     const content = readFileSync(STATS_PATH, "utf-8")
     const parsed = JSON.parse(content) as StatsFile
-    if (parsed?.version === CURRENT_VERSION && parsed.models) return parsed
+    if (parsed?.version === CURRENT_VERSION && parsed.models) {
+      if (!Array.isArray(parsed.recentMessageIDs)) parsed.recentMessageIDs = []
+      return parsed
+    }
   } catch { /* 文件损坏时返回空白统计 */ }
-  return { version: CURRENT_VERSION, updatedAt: "", migratedFromLogs: false, models: {} }
+  return { version: CURRENT_VERSION, updatedAt: "", migratedFromLogs: false, recentMessageIDs: [], models: {} }
 }
 
 /** 原子写：先写临时文件再 rename，写入中途崩溃不会损坏既有统计 */
@@ -149,6 +153,21 @@ export function updatePersistedStats(entry: LogEntry): void {
     // 优先在未落盘的内存副本上累积；为空时从磁盘加载（也读入其他宿主进程的写入）
     const file = pending ?? loadStatsFile()
     pending = file
+
+    // 跨进程/跨端幂等防重：若本消息已统计过，绝对不重复累加，彻底规避双写翻倍！
+    if (entry.messageID) {
+      if (!Array.isArray(file.recentMessageIDs)) {
+        file.recentMessageIDs = []
+      }
+      if (file.recentMessageIDs.includes(entry.messageID)) {
+        return
+      }
+      file.recentMessageIDs.push(entry.messageID)
+      if (file.recentMessageIDs.length > 500) {
+        file.recentMessageIDs.shift()
+      }
+    }
+
     let acc = file.models[entry.model]
     if (!acc) {
       acc = createAccumulator(entry.model, entry.providerID)

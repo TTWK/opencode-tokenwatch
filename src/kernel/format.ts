@@ -31,6 +31,7 @@ export interface ModelBreakdownItem {
   outputTokens: number
   reasoningTokens: number
   cacheRead: number
+  cacheWrite?: number
   totalCost: number
 }
 
@@ -43,6 +44,7 @@ export interface ProviderBreakdownItem {
   outputTokens: number
   reasoningTokens: number
   cacheRead: number
+  cacheWrite?: number
   totalCost: number
 }
 
@@ -55,6 +57,7 @@ export interface DailyBreakdownItem {
   outputTokens: number
   reasoningTokens: number
   cacheRead: number
+  cacheWrite?: number
   totalCost: number
 }
 
@@ -69,6 +72,7 @@ export interface SessionBreakdownItem {
   outputTokens: number
   reasoningTokens: number
   cacheRead: number
+  cacheWrite?: number
   totalCost: number
   day: string
 }
@@ -469,6 +473,7 @@ export interface LogEntry {
   providerID: string
   modelID: string
   sessionID: string
+  messageID?: string
   ttft_ms: number | null
   tps: number | null
   /** provider 活跃窗口：streamed - created；旧日志缺省时以 latency_ms 近似 */

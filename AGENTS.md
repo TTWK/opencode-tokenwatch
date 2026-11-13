@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-11-13（v0.7.1）
+> 最后更新：2026-11-13（v0.7.2）
 
 ---
 
@@ -10,7 +10,7 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.7.1`
+- **版本**：`0.7.2`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
 - **构建工具**：`tsc`（类型声明生成）+ `esbuild`（JS 打包，含 SolidJS JSX 预编译）
@@ -346,6 +346,22 @@ const tokenTotal = (msg) =>
 | 🔴 P0 | `runtime.tsx` | 全端落盘中断导致性能日志无法重放恢复（TUI 误判 Server 权威落盘） | **已修复（TUI 进程保持权威持久化落盘）** |
 | 🔴 P0 | `sidebar.tsx` | 侧边栏专属性能模糊匹配漏洞导致跨 Provider 错位或子串贪婪误配 | **已修复（严格限定同 Provider 隔离与叶子模型全等）** |
 | 🟡 P1 | `v2/adapter.ts` | 会话中切换模型时 step.ended 可能降级为 unknown | **已修复（step.started 预存归属与多级模型降级链）** |
+| 🔴 P0 | `runtime.tsx` / `server.ts` / `store.ts` | Server 与 TUI 双写导致同一消息计数翻倍 | **已修复（跨进程 ID 幂等去重与滑动窗口拦截）** |
+| 🔴 P0 | `runtime.tsx` | 跨会话消息污染（迟到事件混入新会话前台） | **已修复（严格会话归属校验与独立写队列隔离）** |
+| 🔴 P0 | `v1/v2 data-source.ts` | 失败口径两代不一致且非零 Token 丢失 | **已修复（finish=error判失败，非零Token保留用量）** |
+| 🟠 P1 | `v1/data-source.ts` | v1 SQL stderr 存在即抛错导致功能不可用 | **已修复（仅 stdout 为空时判错）** |
+| 🟠 P1 | `perf.ts` | 过滤后性能统计错误回退到全量历史 | **已修复（窗口过滤杜绝全量 persisted 泄漏）** |
+| 🟠 P1 | `runtime.tsx` | 同 ID 消息更新因长度不变被跳过 | **已修复（areMessagesEqual 深度内容比较守卫）** |
+| 🟠 P1 | `v2/adapter.ts` | step.started 局部信息遮蔽真实完整模型 | **已修复（pickValid 过滤 unknown 真实模型优先）** |
+| 🟠 P1 | `server.ts` / `perf.ts` | Server 端 TTFT 判定精度缺陷与伪造 0ms | **已修复（补齐 delta 订阅，缺 delta 诚实记 null）** |
+| 🟠 P1 | `report-html.ts` | HTML 模型对比图 Top 15 硬截断 | **已修复（取消截断，完整展示全部活跃模型）** |
+| 🟠 P1 | `report-html.ts` | Provider 卡片 TPS 口径与 KPI 不一致 | **已修复（统一为活跃耗时加权）** |
+| 🟠 P1 | `report-html.ts` / `format.ts` | HTML 模型图遗漏 reasoning 与 cacheWrite | **已修复（补齐五分量堆叠与数据源汇总）** |
+| 🟠 P1 | `v2/data-source.ts` | v2 多模型会话明细错标为单一模型 | **已修复（按 session/provider/model 联合分组）** |
+| 🟡 P2 | `perf.ts` | 流式 partial message.updated 清除 TTFT 锚点 | **已修复（流式中间态不误删输出锚点）** |
+| 🟡 P2 | `sidebar.tsx` | 侧边栏模型性能匹配单方 unknown 跨 provider | **已修复（强化严格 Provider 隔离）** |
+| 🟡 P2 | `sidebar.tsx` | Token 分布估算超 input 未比例收缩 | **已修复（比例收缩并设 other 兜底，总和严格对齐）** |
+| 🟡 P2 | `runtime.tsx` / `perf.ts` | MRU 淘汰 off-by-one 与日志 ts 时间戳 | **已修复（精确差异淘汰，ts 取请求 created）** |
 
 ---
 

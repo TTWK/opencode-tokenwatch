@@ -264,8 +264,8 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     }
   }
 
-  // 2. 有效用量统计（过滤掉失败请求，与 v1 SQL 口径一致）
-  const successRecords = matchedRecords.filter((r) => !r.isFailure)
+  // 2. 有效用量统计（非零 Token 记录全部计入用量，含非零 Token 的 error 消息，与 v1 口径严格统一）
+  const usageRecords = matchedRecords.filter((r) => r.total > 0)
 
   const sessionAgg = new Map<string, SessionBreakdownItem>()
   const modelAgg = new Map<string, ModelBreakdownItem>()
@@ -285,7 +285,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
   let summaryTotalCost = 0
   let summaryRequestCount = 0
 
-  for (const r of successRecords) {
+  for (const r of usageRecords) {
     summaryTotalTokens += r.total
     summaryInputTokens += r.input
     summaryOutputTokens += r.output
@@ -295,8 +295,9 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     summaryTotalCost += r.cost
     summaryRequestCount++
 
-    // Session 维度
-    let s = sessionAgg.get(r.sessionId)
+    // Session 维度（按 sessionId + provider + model 联合分组，准确呈现多模型会话）
+    const sessionKey = `${r.sessionId}:${r.provider}:${r.model}`
+    let s = sessionAgg.get(sessionKey)
     if (!s) {
       s = {
         sessionId: r.sessionId,
@@ -309,10 +310,11 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
         outputTokens: 0,
         reasoningTokens: 0,
         cacheRead: 0,
+        cacheWrite: 0,
         totalCost: 0,
         day: r.day,
       }
-      sessionAgg.set(r.sessionId, s)
+      sessionAgg.set(sessionKey, s)
     }
     s.requests++
     s.totalTokens += r.total
@@ -320,6 +322,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     s.outputTokens += r.output
     s.reasoningTokens += r.reasoning
     s.cacheRead += r.cacheRead
+    s.cacheWrite = (s.cacheWrite ?? 0) + r.cacheWrite
     s.totalCost += r.cost
     if (r.day > s.day) s.day = r.day
 
@@ -337,6 +340,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
         outputTokens: 0,
         reasoningTokens: 0,
         cacheRead: 0,
+        cacheWrite: 0,
         totalCost: 0,
       }
       modelAgg.set(modelKey, m)
@@ -347,6 +351,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     m.outputTokens += r.output
     m.reasoningTokens += r.reasoning
     m.cacheRead += r.cacheRead
+    m.cacheWrite = (m.cacheWrite ?? 0) + r.cacheWrite
     m.totalCost += r.cost
     ;(modelSessions.get(modelKey) ?? modelSessions.set(modelKey, new Set()).get(modelKey)!).add(r.sessionId)
 
@@ -362,6 +367,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
         outputTokens: 0,
         reasoningTokens: 0,
         cacheRead: 0,
+        cacheWrite: 0,
         totalCost: 0,
       }
       providerAgg.set(r.provider, p)
@@ -372,6 +378,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     p.outputTokens += r.output
     p.reasoningTokens += r.reasoning
     p.cacheRead += r.cacheRead
+    p.cacheWrite = (p.cacheWrite ?? 0) + r.cacheWrite
     p.totalCost += r.cost
     ;(providerSessions.get(r.provider) ?? providerSessions.set(r.provider, new Set()).get(r.provider)!).add(r.sessionId)
 
@@ -387,6 +394,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
         outputTokens: 0,
         reasoningTokens: 0,
         cacheRead: 0,
+        cacheWrite: 0,
         totalCost: 0,
       }
       dailyAgg.set(r.day, d)
@@ -397,6 +405,7 @@ function buildReport(snapshot: Snapshot, filters: UsageFilters): UsageReport {
     d.outputTokens += r.output
     d.reasoningTokens += r.reasoning
     d.cacheRead += r.cacheRead
+    d.cacheWrite = (d.cacheWrite ?? 0) + r.cacheWrite
     d.totalCost += r.cost
     ;(dailySessions.get(r.day) ?? dailySessions.set(r.day, new Set()).get(r.day)!).add(r.sessionId)
   }

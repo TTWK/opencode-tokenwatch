@@ -96,11 +96,13 @@ function renderKpiCards(data: CombinedReportData): string {
 }
 
 function renderModelChartInit(data: CombinedReportData): string {
-  const models = sortModelsByUsage(data.models).slice(0, 15)
+  const models = sortModelsByUsage(data.models)
   const names = models.map(m => m.model)
   const inputData = models.map(m => m.inputTokens)
   const outputData = models.map(m => m.outputTokens)
-  const cacheData = models.map(m => m.cacheRead)
+  const reasoningData = models.map(m => m.reasoningTokens)
+  const cacheReadData = models.map(m => m.cacheRead)
+  const cacheWriteData = models.map(m => m.cacheWrite ?? 0)
   const tpsData = models.map(m => {
     const perf = data.perfSummary.find(p => p.model === `${m.provider}/${m.model}`)
     return perf?.avgTPS ?? null
@@ -109,7 +111,9 @@ function renderModelChartInit(data: CombinedReportData): string {
   return `var modelNames = ${jsonLit(names)};
 var modelInput = ${jsonLit(inputData)};
 var modelOutput = ${jsonLit(outputData)};
-var modelCache = ${jsonLit(cacheData)};
+var modelReasoning = ${jsonLit(reasoningData)};
+var modelCacheRead = ${jsonLit(cacheReadData)};
+var modelCacheWrite = ${jsonLit(cacheWriteData)};
 var modelTps = ${jsonLit(tpsData)};
 
 function initModelChart() {
@@ -122,7 +126,6 @@ function initModelChart() {
 }
 
 function renderModelChart(chart) {
-  var totals = modelInput.map(function(v, i) { return v + modelOutput[i] + modelCache[i]; });
   var option = {
     tooltip: {
       trigger: 'axis',
@@ -145,7 +148,7 @@ function renderModelChart(chart) {
       }
     },
     legend: {
-      data: ['Input', 'Output', 'Cache', 'TPS'],
+      data: ['Input', 'Cache Read', 'Cache Write', 'Reasoning', 'Output', 'TPS'],
       textStyle: { color: '#B0B0C0' },
       top: 5
     },
@@ -185,23 +188,39 @@ function renderModelChart(chart) {
         barMaxWidth: 40
       },
       {
-        name: 'Cache',
+        name: 'Cache Read',
         type: 'bar',
         stack: 'tokens',
-        data: modelCache,
+        data: modelCacheRead,
         itemStyle: { color: '#00F593' },
         barMaxWidth: 40,
         label: {
           show: true,
           position: 'inside',
           formatter: function(p) {
-            var cache = modelCache[p.dataIndex];
+            var cache = modelCacheRead[p.dataIndex];
             var input = modelInput[p.dataIndex];
             if (cache === 0) return '';
             return (cache / (input + cache) * 100).toFixed(0) + '%';
           },
           color: '#fff', fontSize: 10, fontWeight: 'bold'
         }
+      },
+      {
+        name: 'Cache Write',
+        type: 'bar',
+        stack: 'tokens',
+        data: modelCacheWrite,
+        itemStyle: { color: '#0284C7' },
+        barMaxWidth: 40
+      },
+      {
+        name: 'Reasoning',
+        type: 'bar',
+        stack: 'tokens',
+        data: modelReasoning,
+        itemStyle: { color: '#F59E0B' },
+        barMaxWidth: 40
       },
       {
         name: 'Output',
@@ -214,7 +233,7 @@ function renderModelChart(chart) {
           show: true,
           position: 'top',
           formatter: function(p) {
-            var total = modelInput[p.dataIndex] + modelOutput[p.dataIndex] + modelCache[p.dataIndex];
+            var total = modelInput[p.dataIndex] + modelOutput[p.dataIndex] + modelReasoning[p.dataIndex] + modelCacheRead[p.dataIndex] + modelCacheWrite[p.dataIndex];
             return total > 0 ? fmt(total) : '';
           },
           color: '#fff', fontSize: 10, fontWeight: 'bold'
@@ -399,14 +418,13 @@ function renderProviderCards(data: CombinedReportData): string {
     }
     const avgTtft = ttftReqs > 0 ? ttftSum / ttftReqs : null;
 
-    let tpsSum = 0, tpsReqs = 0;
+    let pTpsTokens = 0, pTpsMs = 0;
     for (const x of perfItems) {
-      if (x.avgTPS != null && x.avgTPS > 0) {
-        tpsSum += x.avgTPS * x.tpsCount;
-        tpsReqs += x.tpsCount;
-      }
+      // 跨模型仍按 provider 活跃耗时加权（同 KPI 卡口径），杜绝简单算术平均
+      pTpsTokens += x.totalTpsTokens ?? 0;
+      pTpsMs += x.totalTpsMs ?? 0;
     }
-    const avgTps = tpsReqs > 0 ? tpsSum / tpsReqs : null;
+    const avgTps = pTpsMs > 0 ? pTpsTokens / (pTpsMs / 1000) : null;
 
     return `
     <div class="provider-card" style="border-color:${providerBorderColor(p.provider)}">
@@ -731,7 +749,7 @@ function initHeatmapChart() {
 export function generateUsageHtml(data: CombinedReportData): string {
   const metaStr = renderMeta(data)
   const kpiStr = renderKpiCards(data)
-  const modelsForChart = sortModelsByUsage(data.models).slice(0, 15)
+  const modelsForChart = sortModelsByUsage(data.models)
   const modelChartVisible = modelsForChart.length > 0
   const modelChartJs = modelChartVisible ? renderModelChartInit(data) : ""
   const scatterChartJs = renderScatterChartInit(data)

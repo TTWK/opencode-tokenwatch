@@ -81,7 +81,9 @@ function normalizeMessageUpdated(event: any): NormalizedMessageEvent | null {
     reasoning: tokens.reasoning ?? 0,
     cacheRead: cache.read ?? 0,
     cacheWrite: cache.write ?? 0,
-    total: tokens.total ?? 0,
+    total: typeof tokens.total === "number"
+      ? tokens.total
+      : (tokens.input ?? 0) + (tokens.output ?? 0) + (tokens.reasoning ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
     cost: info.cost ?? 0,
     timeCreated: info.time?.created,
     // v1 没有独立 streamed 边界，以 completed 作为生成终点近似

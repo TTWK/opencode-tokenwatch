@@ -1,6 +1,6 @@
 import type { LogEntry, ModelPerfStats, SessionPerfStats, UsageFilters } from "./format.js"
 import { accumulateEntry, createAccumulator, finalizeAccumulator, type ModelAccumulator } from "./perf-aggregate.js"
-import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs"
+import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -9,6 +9,27 @@ import { readPersistedStats, updatePersistedStats } from "./store.js"
 const LOG_PATH = join(homedir(), ".opencode", "tokenwatch.jsonl")
 /** rename 轮转后的上一代日志（保存更早历史，stats 迁移会一并读取） */
 const LOG_PATH_ROTATED = LOG_PATH + ".1"
+
+/** 快速检测日志文件末尾是否已有该 messageID，毫秒级跨进程幂等规避重复落盘 */
+function isMessageAlreadyLogged(messageID: string): boolean {
+  if (!messageID || !existsSync(LOG_PATH)) return false
+  try {
+    const size = statSync(LOG_PATH).size
+    if (size === 0) return false
+    const readSize = Math.min(size, 16 * 1024)
+    const buf = Buffer.alloc(readSize)
+    const fd = openSync(LOG_PATH, "r")
+    try {
+      readSync(fd, buf, 0, readSize, size - readSize)
+    } finally {
+      closeSync(fd)
+    }
+    const tail = buf.toString("utf-8")
+    return tail.includes(`"messageID":"${messageID}"`)
+  } catch {
+    return false
+  }
+}
 
 interface PartEvent {
   message_id?: string
@@ -82,10 +103,10 @@ class PerfTracker {
     // token，不参与 TTFT —— 否则 v1 的 TTFT 会恒为毫秒级。TPS 则直接
     // 使用消息的 created → streamed，不依赖这些可能缺失的事件锚点。
     const type = event.type
-    const isDelta = type != null && type.endsWith("-delta")
+    const isDelta = type != null && (type.endsWith("-delta") || type.endsWith(".delta"))
     const isWindowAnchor = type === "step" || type === "part-open"
       || type === "step-start" || type === "step-finish"
-      || (type != null && type.endsWith("-started"))
+      || (type != null && (type.endsWith("-started") || type.endsWith(".started")))
     const isFirstTokenAnchor = isDelta || !isWindowAnchor
     if (isFirstTokenAnchor) {
       const curOut = this.firstOutputTimes.get(event.message_id) ?? Number.POSITIVE_INFINITY
@@ -108,8 +129,7 @@ class PerfTracker {
     const streamed = info.time?.streamed
     const completed = info.time?.completed
     if (!created || (!streamed && !completed)) {
-      this.firstPartTimes.delete(messageID)
-      this.firstOutputTimes.delete(messageID)
+      // 流式中间更新态：保留已记录的首 token/part 锚点，等待最终完成结算（杜绝提前误删）
       return
     }
 
@@ -133,8 +153,8 @@ class PerfTracker {
       return
     }
 
-    const firstPart = this.firstPartTimes.get(messageID) ?? null
-    const firstOutput = this.firstOutputTimes.get(messageID) ?? firstPart
+    // 严禁回退 step 起点伪造 0ms，若无可见输出 delta/part 锚点，TTFT 诚实地记为 null
+    const firstOutput = this.firstOutputTimes.get(messageID) ?? null
 
     const latencyMs = completed ? completed - created : null
     const activeMs = streamed ? streamed - created : null
@@ -158,11 +178,12 @@ class PerfTracker {
     }
 
     const entry: LogEntry = {
-      ts: new Date().toISOString(),
+      ts: new Date(created ?? Date.now()).toISOString(),
       model,
       providerID,
       modelID,
       sessionID,
+      messageID: messageID || undefined,
       ttft_ms: ttftMs,
       tps,
       active_ms: activeMs,
@@ -190,7 +211,12 @@ class PerfTracker {
         try { unlinkSync(LOG_PATH_ROTATED) } catch { /* 首次轮转无旧文件 */ }
         renameSync(LOG_PATH, LOG_PATH_ROTATED)
       }
-      appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n")
+      // 跨进程/跨端幂等检查：若文件末尾已包含该 messageID，不重复追加写入
+      if (entry.messageID && isMessageAlreadyLogged(entry.messageID)) {
+        // 已有记录，跳过写日志
+      } else {
+        appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n")
+      }
     } catch {
       // Silently fail — logging is non-critical
     }
@@ -394,7 +420,9 @@ export function getWindowPerfStats(filters: UsageFilters = {}, activeModels?: Se
     covered.add(model)
   }
 
-  if (activeModels) {
+  // 严格杜绝窗口外历史数据注入：仅在没有任何时间/会话/模型等过滤条件时，
+  // 活跃模型才允许由全量持久化统计补全；任何带窗口过滤的场景绝不回退到全量历史！
+  if (!hasFilter && activeModels) {
     for (const p of persisted) {
       if (activeModels.has(p.model) && !covered.has(p.model)) {
         result.push(p)

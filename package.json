@@ -1,6 +1,6 @@
 {
   "name": "opencode-tokenwatch",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Real-time token usage, cache analytics & performance dashboard plugin for OpenCode CLI",
   "type": "module",
   "main": "./dist/server.js",
@@ -34,6 +34,7 @@
   },
   "scripts": {
     "build": "tsc && node build.tui.mjs",
+    "test": "npm run build && node scripts/verify-full-audit-fixes.mjs && node scripts/smoke-dual-host.mjs && node scripts/verify-headless.mjs && node scripts/verify-date-filtering.mjs && node scripts/verify-server-telemetry.mjs",
     "test:tps": "npm run build && node scripts/verify-tps.mjs",
     "release:check": "node ./scripts/publish-check.mjs",
     "prepublishOnly": "npm run build"

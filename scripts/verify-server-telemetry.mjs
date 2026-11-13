@@ -39,13 +39,15 @@ assert.equal(typeof disposeServer, "function", "setup() 应返回清理函数")
 assert.ok(isServerActive(), "Server 启动后 isServerActive() 必须为 true")
 console.log("PASS 1: Server 收集器启动且激活状态就绪")
 
-// 2. 模拟由 OpenCode Desktop 触发的 step.started -> text.started -> step.ended 事件流
+// 2. 模拟由 OpenCode Desktop 触发的 step.started -> text.started -> text.delta -> step.ended 事件流
 const stepStartHandler = handlers.get("session.step.started")
 const textStartHandler = handlers.get("session.text.started")
+const textDeltaHandler = handlers.get("session.text.delta")
 const stepEndHandler = handlers.get("session.step.ended")
 
 assert.ok(stepStartHandler, "session.step.started 监听器必须存在")
 assert.ok(textStartHandler, "session.text.started 监听器必须存在")
+assert.ok(textDeltaHandler, "session.text.delta 监听器必须存在")
 assert.ok(stepEndHandler, "session.step.ended 监听器必须存在")
 
 const testMsgID = "desktop-msg-" + Date.now()
@@ -60,8 +62,18 @@ stepStartHandler({
   },
 })
 
+// 占位符打开（窗口锚点，不参与首 token TTFT）
 textStartHandler({
   type: "session.text.started",
+  data: {
+    assistantMessageID: testMsgID,
+    timestamp: t0 + 20,
+  },
+})
+
+// 首个可见 token delta 片段（精确 TTFT 锚点）
+textDeltaHandler({
+  type: "session.text.delta",
   data: {
     assistantMessageID: testMsgID,
     timestamp: t0 + 250, // TTFT = 250ms
@@ -159,10 +171,11 @@ disposeServer()
 assert.equal(isServerActive(), false, "dispose 后 isServerActive() 应恢复为 false")
 
 const fallbackTracker = createPerfTracker({ persistLog: !isServerActive() })
+const fallbackMsgID = "fallback-msg-" + Date.now()
 fallbackTracker.handleMessageUpdated({
   properties: {
     info: {
-      id: "fallback-msg-test",
+      id: fallbackMsgID,
       sessionID: "fallback-session-1",
       role: "assistant",
       providerID: "deepseek",

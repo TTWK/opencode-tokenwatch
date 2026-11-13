@@ -162,10 +162,17 @@ function stringifyToolContent(content: any): string {
  * 并结合 step.started 缓存、data 与 session 对象的 model 字段做多层兜底解析，
  * 彻底防止多模型切换场景下模型信息降级为 unknown。
  */
+function pickValid(...candidates: Array<string | undefined | null>): string {
+  for (const c of candidates) {
+    if (c && c !== "unknown") return c
+  }
+  return "unknown"
+}
+
 function buildMessageEvent(
   ctx: V2Context,
   data: any,
-  pendingModels?: Map<string, { providerID: string; modelID: string }>,
+  pendingModels?: Map<string, { providerID?: string; modelID?: string }>,
 ): NormalizedMessageEvent | null {
   const sessionID = data?.sessionID ?? ""
   const messageID = data?.assistantMessageID ?? ""
@@ -176,10 +183,26 @@ function buildMessageEvent(
   const pending = messageID && pendingModels ? pendingModels.get(messageID) : undefined
   if (messageID && pendingModels) pendingModels.delete(messageID)
 
-  // 模型信息多层降级：message.model > pending(step.started) > data.model > session.model
-  const modelObj = message?.model ?? data?.model ?? session?.model ?? {}
-  const providerID = pending?.providerID ?? modelObj.providerID ?? message?.providerID ?? data?.providerID ?? "unknown"
-  const modelID = pending?.modelID ?? modelObj.id ?? message?.modelID ?? data?.modelID ?? "unknown"
+  // 模型信息严格多层降级：message.model > pending(step.started) > data.model > session.model
+  // 杜绝 "unknown" 伪真值遮蔽真实完整模型
+  const providerID = pickValid(
+    message?.model?.providerID,
+    message?.providerID,
+    pending?.providerID,
+    data?.model?.providerID,
+    data?.providerID,
+    session?.model?.providerID,
+    session?.providerID,
+  )
+  const modelID = pickValid(
+    message?.model?.id,
+    message?.modelID,
+    pending?.modelID,
+    data?.model?.id,
+    data?.modelID,
+    session?.model?.id,
+    session?.modelID,
+  )
 
   const total =
     (tokens.input ?? 0) +
@@ -215,7 +238,7 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
   /** 待挂载的 keymap layer 注册动作，由 registerSidebar 在 slot 渲染时执行 */
   let mountKeymapLayer: (() => void) | undefined
   /** 记录单步开始时的模型归属，以在 step.ended 消息尚未入库时精准补全 */
-  const pendingStepModels = new Map<string, { providerID: string; modelID: string }>()
+  const pendingStepModels = new Map<string, { providerID?: string; modelID?: string }>()
 
   const clientScanDataSource: UsageDataSource = {
     kind: "client-scan",
@@ -255,7 +278,10 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
             const pId = mObj.providerID ?? data?.providerID
             const mId = mObj.id ?? data?.modelID
             if (pId || mId) {
-              pendingStepModels.set(messageID, { providerID: pId ?? "unknown", modelID: mId ?? "unknown" })
+              pendingStepModels.set(messageID, {
+                providerID: pId && pId !== "unknown" ? pId : undefined,
+                modelID: mId && mId !== "unknown" ? mId : undefined,
+              })
             }
           }
           const part: NormalizedPartEvent = {
