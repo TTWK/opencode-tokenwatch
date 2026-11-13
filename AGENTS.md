@@ -337,6 +337,11 @@ const tokenTotal = (msg) =>
 | 🟡 P1 | `sidebar.tsx` | modelStats 未过滤全零 token | **已修复（二次保障过滤）** |
 | 🟡 P1 | `generate-usage-html.ts` | HTML 报告含无效零 token 记录 | **已修复（各渲染函数过滤）** |
 | 🟡 P1 | `commands.tsx` | aggregatePerfStats 未跳过全零条目 | **已修复** |
+| 🔴 P0 | `v2/data-source.ts` | HTML 报告选择非全部时间后，下方图表/表格按全量汇总 | **已修复（消息级轻量摘要动态精确聚合）** |
+| 🔴 P0 | `report-html.ts` | Efficiency vs Cost 图表与 Latency 表格泄漏历史非活跃模型 | **已修复（限定活跃模型）** |
+| 🟡 P1 | `report-html.ts` | Model Comparison Matrix 硬编码 1M 门槛误拦轻量用量 | **已修复（改为 Top 15，移除 1M 拦截）** |
+| 🟡 P1 | `report.ts` | 内嵌导出 JSON 的 perfLogs 未遵从时间窗口过滤 | **已修复（按时间窗口严格过滤）** |
+| 🟡 P1 | `sidebar.tsx` | 多模型会话中仅展示一个 ~tps 导致模型归属不清 | **已修复（每个模型卡片固定渲染专属 TPS/TTFT）** |
 
 ---
 
