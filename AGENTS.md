@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-11-13（v0.7.0）
+> 最后更新：2026-11-13（v0.7.1）
 
 ---
 
@@ -10,7 +10,7 @@
 **opencode-tokenwatch** 是 [OpenCode CLI](https://github.com/anomalyco/opencode) 的 TUI 插件，为 AI 编程会话提供实时 Token 用量统计、缓存效率分析与性能指标监控。
 
 - **npm 包名**：`opencode-tokenwatch`
-- **版本**：`0.7.0`
+- **版本**：`0.7.1`
 - **语言**：TypeScript (ESM)，JSX via SolidJS
 - **目标运行环境**：Node.js ≥ 18，OpenCode CLI TUI 插件系统
 - **构建工具**：`tsc`（类型声明生成）+ `esbuild`（JS 打包，含 SolidJS JSX 预编译）
@@ -342,6 +342,10 @@ const tokenTotal = (msg) =>
 | 🟡 P1 | `report-html.ts` | Model Comparison Matrix 硬编码 1M 门槛误拦轻量用量 | **已修复（改为 Top 15，移除 1M 拦截）** |
 | 🟡 P1 | `report.ts` | 内嵌导出 JSON 的 perfLogs 未遵从时间窗口过滤 | **已修复（按时间窗口严格过滤）** |
 | 🟡 P1 | `sidebar.tsx` | 多模型会话中仅展示一个 ~tps 导致模型归属不清 | **已修复（每个模型卡片固定渲染专属 TPS/TTFT）** |
+| 🔴 P0 | `runtime.tsx` | 多模型会话重进后只剩单模型（短轮询早停与残卷覆写 KV） | **已修复（ID 幂等增量合并与渐进式稳定轮询）** |
+| 🔴 P0 | `runtime.tsx` | 全端落盘中断导致性能日志无法重放恢复（TUI 误判 Server 权威落盘） | **已修复（TUI 进程保持权威持久化落盘）** |
+| 🔴 P0 | `sidebar.tsx` | 侧边栏专属性能模糊匹配漏洞导致跨 Provider 错位或子串贪婪误配 | **已修复（严格限定同 Provider 隔离与叶子模型全等）** |
+| 🟡 P1 | `v2/adapter.ts` | 会话中切换模型时 step.ended 可能降级为 unknown | **已修复（step.started 预存归属与多级模型降级链）** |
 
 ---
 

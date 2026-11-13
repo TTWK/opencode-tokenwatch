@@ -469,13 +469,35 @@ export function TokenWatchPanel(props: TokenWatchPanelProps) {
           {([key, stat]) => {
             const isExpanded = () => collapse().models[key] !== true
 
-            // 获取该模型专属的性能统计（精准匹配 + modelID 智能兜底）
+            // 获取该模型专属的性能统计（精准匹配 + 严格 Provider 隔离兜底）
             const modelPerf = () => {
               const models = perfStats().models
+              if (!models) return undefined
               if (models[key]) return models[key]
+
+              // 规范化精准比较（忽略 URI 或大小写差异）
+              const lowerKey = key.toLowerCase()
               for (const [k, v] of Object.entries(models)) {
-                if (k === key || k.endsWith("/" + stat.modelID) || key.endsWith("/" + k)) {
-                  return v
+                if (k.toLowerCase() === lowerKey) return v
+              }
+
+              // 严格限定同一 Provider，绝不允许跨 Provider 串位
+              const expectedProvider = stat.providerID.toLowerCase()
+              const expectedModel = stat.modelID.toLowerCase()
+              const expectedLeaf = expectedModel.includes("/") ? expectedModel.split("/").pop()! : expectedModel
+
+              for (const [k, v] of Object.entries(models)) {
+                const parts = k.split("/")
+                const kProvider = parts.length > 1 ? parts[0].toLowerCase() : ""
+                const kModel = parts.length > 1 ? parts.slice(1).join("/").toLowerCase() : parts[0].toLowerCase()
+                const kLeaf = parts[parts.length - 1].toLowerCase()
+
+                const isSameProvider = !kProvider || kProvider === "unknown" || expectedProvider === "unknown" || kProvider === expectedProvider
+                if (isSameProvider) {
+                  // 同 Provider 下，完整 modelID 相等，或者合法的叶子模型名相等（长度>3防误判）
+                  if (kModel === expectedModel || (kLeaf === expectedLeaf && expectedLeaf.length > 3)) {
+                    return v
+                  }
                 }
               }
               return undefined

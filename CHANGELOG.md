@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-13
+
+### Fixed
+- **host/runtime**: 修复多模型会话重进后只剩单模型的严重缺陷。改用消息 ID 幂等增量合并机制，重构短轮询为渐进式稳定轮询，彻底杜绝单条残卷截断轮询并覆写覆盖历史缓存的问题。
+- **host/runtime**: 修复全端落盘机制瘫痪导致的历史指标无法恢复问题。保持 TUI 客户端对本地完整流式会话指标的权威持久化落盘，确保 TPS、TTFT 与活跃耗时数据永不丢盘。
+- **ui/sidebar**: 修复侧边栏模型专属性能指标的模糊匹配串位漏洞。实施严格的 Provider 隔离与叶子模型全等匹配，杜绝跨 Provider 错位或子串贪婪匹配。
+- **host/v2**: 在单步开始（`step.started`）与结束（`step.ended`）多级缓存模型归属，强化消息 model 字段解析降级链，防止多模型切换场景下模型信息降级为 `unknown`。
+
 ## [0.7.0] - 2026-11-13
 
 ### Added

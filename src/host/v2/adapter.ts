@@ -159,15 +159,27 @@ function stringifyToolContent(content: any): string {
  *
  * step.ended 自带 tokens/cost/finish，但不含 model（model 在 step.started，
  * 更可靠的是直接查消息对象）。这里以 assistantMessageID 为准回查消息，
- * 拿到 model/provider 后再归一化。
+ * 并结合 step.started 缓存、data 与 session 对象的 model 字段做多层兜底解析，
+ * 彻底防止多模型切换场景下模型信息降级为 unknown。
  */
-function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | null {
+function buildMessageEvent(
+  ctx: V2Context,
+  data: any,
+  pendingModels?: Map<string, { providerID: string; modelID: string }>,
+): NormalizedMessageEvent | null {
   const sessionID = data?.sessionID ?? ""
   const messageID = data?.assistantMessageID ?? ""
   const tokens = data?.tokens ?? {}
   const cache = tokens.cache ?? {}
   const message = messageID ? ctx.data.session.message.get(sessionID, messageID) : undefined
-  const model = message?.model ?? {}
+  const session = sessionID ? ctx.data.session.get(sessionID) : undefined
+  const pending = messageID && pendingModels ? pendingModels.get(messageID) : undefined
+  if (messageID && pendingModels) pendingModels.delete(messageID)
+
+  // 模型信息多层降级：message.model > pending(step.started) > data.model > session.model
+  const modelObj = message?.model ?? data?.model ?? session?.model ?? {}
+  const providerID = pending?.providerID ?? modelObj.providerID ?? message?.providerID ?? data?.providerID ?? "unknown"
+  const modelID = pending?.modelID ?? modelObj.id ?? message?.modelID ?? data?.modelID ?? "unknown"
 
   const total =
     (tokens.input ?? 0) +
@@ -180,8 +192,8 @@ function buildMessageEvent(ctx: V2Context, data: any): NormalizedMessageEvent | 
     messageID,
     sessionID,
     role: "assistant",
-    providerID: model.providerID ?? "unknown",
-    modelID: model.id ?? "unknown",
+    providerID,
+    modelID,
     input: tokens.input ?? 0,
     output: tokens.output ?? 0,
     reasoning: tokens.reasoning ?? 0,
@@ -202,6 +214,8 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
   let storeRef: KeyValueStore | undefined
   /** 待挂载的 keymap layer 注册动作，由 registerSidebar 在 slot 渲染时执行 */
   let mountKeymapLayer: (() => void) | undefined
+  /** 记录单步开始时的模型归属，以在 step.ended 消息尚未入库时精准补全 */
+  const pendingStepModels = new Map<string, { providerID: string; modelID: string }>()
 
   const clientScanDataSource: UsageDataSource = {
     kind: "client-scan",
@@ -225,7 +239,7 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
 
       off.push(
         ctx.data.on("session.step.ended", (event: any) => {
-          const normalized = buildMessageEvent(ctx, event?.data)
+          const normalized = buildMessageEvent(ctx, event?.data, pendingStepModels)
           if (normalized) handlers.onMessageUpdated(normalized)
           handlers.onInvalidate()
         }),
@@ -235,8 +249,17 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
       off.push(
         ctx.data.on("session.step.started", (event: any) => {
           const data = event?.data ?? {}
+          const messageID = data?.assistantMessageID
+          if (messageID) {
+            const mObj = data?.model ?? {}
+            const pId = mObj.providerID ?? data?.providerID
+            const mId = mObj.id ?? data?.modelID
+            if (pId || mId) {
+              pendingStepModels.set(messageID, { providerID: pId ?? "unknown", modelID: mId ?? "unknown" })
+            }
+          }
           const part: NormalizedPartEvent = {
-            messageID: data.assistantMessageID,
+            messageID,
             type: "step",
             timeStart: event?.created,
             raw: event,
@@ -411,6 +434,8 @@ export function createV2Adapter(ctx: V2Context, dispose: Set<() => void>): HostA
 
     sessionMessages(sessionID: string) {
       try {
+        // 触发会话消息后台同步，促使宿主拉取完整历史消息
+        void ctx.data.session.message.sync(sessionID).catch(() => {})
         return ctx.data.session.message.list(sessionID) ?? []
       } catch {
         return []

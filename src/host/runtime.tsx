@@ -85,6 +85,20 @@ function rebuildFromMessages(sessionID: string, messages: readonly any[]): Token
   return out
 }
 
+/** 按 messageID 幂等增量合并消息列表，只增不减，防止局部残卷覆盖完整历史 */
+function mergeMessages(existing: readonly TokenMessage[], incoming: readonly TokenMessage[]): TokenMessage[] {
+  const map = new Map<string, TokenMessage>()
+  for (const m of existing) {
+    if (m?.id) map.set(m.id, m)
+  }
+  for (const m of incoming) {
+    if (m?.id) {
+      map.set(m.id, m)
+    }
+  }
+  return Array.from(map.values())
+}
+
 /** 消息数组的 KV 写节流窗口：流式期间每条消息更新都会触发，合并为低频落盘 */
 const PERSIST_DEBOUNCE_MS = 500
 /** KV 中保留消息数组缓存的会话数上限（MRU 淘汰，防止 KV 无界膨胀） */
@@ -97,11 +111,11 @@ const SESSION_INDEX_KEY = "tokenwatch-session-index"
  * 事件 → 聚合/持久化/性能追踪 → 侧边栏渲染 的整条链路在此装配。
  */
 export function startTokenWatch(host: HostAdapter): () => void {
-  // 检测是否有活跃的 Server 遥测收集器在负责持久化。
-  // 若 Server 在线，TUI 进程中的 perfTracker 将关闭文件落盘（persistLog: false），仅作为内存视图；
-  // 若未检测到 Server（单进程 TUI 模式或测试模式），则保持 persistLog: true 自动兜底写入。
-  const serverActive = isServerActive()
-  const perfTracker = createPerfTracker({ persistLog: !serverActive })
+  // 必须保持 TUI 进程本地权威落盘（persistLog: true）：
+  // OpenCode 2 的流式执行事件（step.started/ended、delta、streamed 耗时）
+  // 仅在客户端 TUI 进程的本地总线上派发。Server 进程无法捕获完整的流式首 Token
+  // 与活跃耗时，因此 TUI 必须作为权威落盘源，杜绝因进程状态探测导致全端断流。
+  const perfTracker = createPerfTracker({ persistLog: true })
   const [sidebarRevision, setSidebarRevision] = createSignal(0)
   const [perfRevision, setPerfRevision] = createSignal(0)
   const [allTokenMessages, setAllTokenMessages] = createSignal<TokenMessage[]>([])
@@ -154,7 +168,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
     } catch { /* non-critical */ }
   }
 
-  /** 切换会话：恢复 KV 历史 → 后台轮询重建（历史加载可能是异步的） */
+  /** 切换会话：恢复 KV 历史 → 后台渐进式合并重建（历史加载可能是异步分页的） */
   const switchSession = (sessionID: string): void => {
     if (!sessionID || sessionID === currentSessionID) return
     currentSessionID = sessionID
@@ -177,31 +191,46 @@ export function startTokenWatch(host: HostAdapter): () => void {
     } catch { /* fall through */ }
     setAllTokenMessages(loaded)
 
-    // 历史会话消息可能尚未加载完成：短周期轮询直到拿到数据或超时
+    // 历史会话消息由宿主异步拉取，采用渐进式合并：
+    // 1. 每 200ms 拉取一次并进行 ID 幂等合并，只增不减，绝不覆灭已有历史
+    // 2. 连续 4 次（800ms）消息数量无增长，或达到上限 25 次（5 秒）后停止
     let pollCount = 0
-    const maxPolls = 50 // 最多 10 秒（50 × 200ms）
+    let lastSeenCount = 0
+    let stableCount = 0
+    const maxPolls = 25
+
     pollTimer = setInterval(() => {
       pollCount++
       let existing: readonly any[] = []
       try {
         existing = host.sessionMessages(sessionID)
       } catch { existing = [] }
-      if (!existing || existing.length === 0) {
-        if (pollCount >= maxPolls && pollTimer) {
+
+      if (existing && existing.length > 0) {
+        const rebuilt = rebuildFromMessages(sessionID, existing)
+        if (rebuilt.length > 0) {
+          const current = allTokenMessages()
+          const merged = mergeMessages(current, rebuilt)
+          if (merged.length !== current.length) {
+            setAllTokenMessages(merged)
+            persistThrottled(sessionID, merged)
+          }
+
+          if (rebuilt.length === lastSeenCount) {
+            stableCount++
+          } else {
+            lastSeenCount = rebuilt.length
+            stableCount = 0
+          }
+        }
+      }
+
+      // 稳定无变化达到 4 次（约 800ms 消息总数未变），或者达到轮询总上限
+      if ((stableCount >= 4 && lastSeenCount > 0) || pollCount >= maxPolls) {
+        if (pollTimer) {
           clearInterval(pollTimer)
           pollTimer = null
         }
-        return
-      }
-      const rebuilt = rebuildFromMessages(sessionID, existing)
-      setAllTokenMessages((prev) => {
-        if (prev.length >= rebuilt.length) return prev
-        return rebuilt
-      })
-      persistThrottled(sessionID, rebuilt)
-      if (pollTimer) {
-        clearInterval(pollTimer)
-        pollTimer = null
       }
     }, 200)
   }
@@ -245,6 +274,22 @@ export function startTokenWatch(host: HostAdapter): () => void {
     },
 
     onInvalidate() {
+      if (currentSessionID) {
+        try {
+          const existing = host.sessionMessages(currentSessionID)
+          if (existing && existing.length > 0) {
+            const rebuilt = rebuildFromMessages(currentSessionID, existing)
+            if (rebuilt.length > 0) {
+              const current = allTokenMessages()
+              const merged = mergeMessages(current, rebuilt)
+              if (merged.length !== current.length) {
+                setAllTokenMessages(merged)
+                persistThrottled(currentSessionID, merged)
+              }
+            }
+          }
+        } catch { /* non-critical */ }
+      }
       setSidebarRevision((v) => v + 1)
     },
   })
