@@ -167,13 +167,12 @@ async function scan(ctx: any): Promise<Snapshot> {
     for (const message of messages) {
       if (!isAssistantMessage(message)) continue
       const tokens = message?.tokens
-      if (!tokens) continue
 
-      const input = tokens.input ?? 0
-      const output = tokens.output ?? 0
-      const reasoning = tokens.reasoning ?? 0
-      const cacheRead = tokens.cache?.read ?? 0
-      const cacheWrite = tokens.cache?.write ?? 0
+      const input = tokens?.input ?? 0
+      const output = tokens?.output ?? 0
+      const reasoning = tokens?.reasoning ?? 0
+      const cacheRead = tokens?.cache?.read ?? 0
+      const cacheWrite = tokens?.cache?.write ?? 0
       const total = input + output + reasoning + cacheRead + cacheWrite
       const cost = typeof message?.cost === "number" ? message.cost : 0
       const provider = message?.model?.providerID ?? "unknown"
@@ -181,8 +180,16 @@ async function scan(ctx: any): Promise<Snapshot> {
       const timeCreated = message?.time?.created ?? session?.time?.created ?? Date.now()
       const day = dayOf(timeCreated)
 
-      // v2 用 finish === "error" 判定失败，比 v1 的 tokens.total === 0 启发式更准确
-      const isFailure = message?.finish === "error" || total === 0
+      const hasExplicitError = message?.finish === "error" || message?.error != null
+      const hasFinish = message?.finish != null
+      const hasCompleted = message?.time?.completed != null
+
+      // 尚无终态且全零 Token 的消息仍在进行中，不计成功或失败。
+      if (total === 0 && !hasExplicitError && !hasFinish && !hasCompleted) continue
+
+      // 真实错误状态优先；只有缺少 finish/error 的已完成消息才以零 Token 兜底判失败。
+      // 正常空响应（finish=stop）及取消等非错误终态不计失败。
+      const isFailure = hasExplicitError || (total === 0 && !hasFinish && hasCompleted)
 
       records.push({
         sessionId: sessionID,

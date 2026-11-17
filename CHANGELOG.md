@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ui/sidebar**: 侧边栏模型性能匹配强化严格 Provider 隔离（P2-14），杜绝单方 unknown 跨 Provider 模糊误配。
 - **ui/sidebar**: 优化 Token 分布估算算法（P2-15），估算值超出真实 input 时按比例收缩，差额计入 other 兜底桶，总和严格对齐会话累计 Input。
 - **host/runtime & kernel/perf**: 修复 MRU 淘汰 off-by-one 边界条件；日志条目优先采用请求真实的 `created` 时间戳（P2-17）。
+- **host/v1 & host/v2**: 收紧零 Token 失败兜底，仅适用于缺少错误状态的已完成消息；正常空响应、取消及进行中消息不再误计失败。
+- **kernel/perf**: 缺失 `sessionID` 的性能事件按当前前台会话归属，避免 Token 已计入而性能样本被会话守卫丢弃。
 
 ## [0.7.1] - 2026-11-13
 

@@ -84,6 +84,8 @@ class PerfTracker {
   private statsMap = new Map<string, ModelAccumulator>()
   /** 会话加载令牌：异步重放期间再次切会话时，旧加载结果按令牌过期丢弃 */
   private loadToken = 0
+  /** 当前前台激活的会话 ID，防止非当前会话的迟到事件污染前台内存 statsMap */
+  private activeSessionID = ""
 
   constructor(options: PerfTrackerOptions = {}) {
     this.persistLog = options.persistLog ?? true
@@ -133,7 +135,9 @@ class PerfTracker {
       return
     }
 
-    const sessionID = info.sessionID ?? ""
+    // 与 runtime 的会话归属兜底一致：宿主事件缺省 sessionID 时归入当前前台会话，
+    // 避免 Token 消息已计入当前会话、性能样本却被会话守卫丢弃。
+    const sessionID = info.sessionID || this.activeSessionID
     const providerID = info.providerID ?? "unknown"
     const modelID = info.modelID ?? "unknown"
     const model = `${providerID}/${modelID}`
@@ -197,7 +201,10 @@ class PerfTracker {
     }
 
     this.appendLog(entry)
-    this.updateStats(model, entry)
+    // 严格会话边界守卫：当明确绑定了前台会话时，非当前会话的迟到请求仅安全落盘，绝不污染当前前台内存统计
+    if (!this.activeSessionID || sessionID === this.activeSessionID) {
+      this.updateStats(model, entry)
+    }
   }
 
   private appendLog(entry: LogEntry): void {
@@ -294,6 +301,7 @@ class PerfTracker {
 
   reset(): void {
     this.loadToken++
+    this.activeSessionID = ""
     this.firstPartTimes.clear()
     this.firstOutputTimes.clear()
     this.statsMap.clear()
@@ -307,6 +315,7 @@ class PerfTracker {
    */
   async loadSession(sessionID: string): Promise<void> {
     const token = ++this.loadToken
+    this.activeSessionID = sessionID
     this.firstPartTimes.clear()
     this.firstOutputTimes.clear()
     this.statsMap.clear()
@@ -373,10 +382,15 @@ export function getWindowPerfStats(filters: UsageFilters = {}, activeModels?: Se
   }
 
   const files = [LOG_PATH_ROTATED, LOG_PATH].filter(existsSync)
-  if (files.length === 0 || !hasFilter) {
+  if (!hasFilter) {
     return activeModels
       ? persisted.filter((p) => activeModels.has(p.model))
       : persisted
+  }
+
+  // 存在过滤条件时：必须基于日志重放窗口；若无日志文件，诚实返回空数组，绝不将全量历史统计充当窗口结果
+  if (files.length === 0) {
+    return []
   }
 
   const map = new Map<string, ModelAccumulator>()

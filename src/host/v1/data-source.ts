@@ -402,15 +402,32 @@ export async function getErrorStats(filters: UsageFilters = {}): Promise<ErrorSt
   if (filters.endDate && isValidDate(filters.endDate)) {
     baseConds.push(`date(m.time_created / 1000, 'unixepoch', 'localtime') <= '${filters.endDate}'`)
   }
+  // 尚无终态且全零 Token 的消息仍在进行中，不计成功或失败。
+  baseConds.push(`NOT (
+    coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0
+    AND json_extract(m.data, '$.finish') IS NULL
+    AND json_extract(m.data, '$.error') IS NULL
+    AND json_extract(m.data, '$.time.completed') IS NULL
+  )`)
   const baseWhere = baseConds.join(" AND ")
 
-  // 按模型细化：同时统计成功和失败请求（真实 finish=error 或 error 不为空或 total=0 计为失败）
+  // 真实错误状态优先；仅缺少 finish/error 的已完成消息以零 Token 兜底判失败。
+  // finish=stop、取消等非错误终态不误计失败，与 v2 口径一致。
   const sql = `
 SELECT
   coalesce(json_extract(m.data, '$.providerID'), 'unknown') as provider,
   coalesce(json_extract(m.data, '$.modelID'), 'unknown') as model,
   count(*) as total,
-  sum(CASE WHEN json_extract(m.data, '$.finish') = 'error' OR json_extract(m.data, '$.error') IS NOT NULL OR coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0 THEN 1 ELSE 0 END) as failed
+  sum(CASE WHEN
+    json_extract(m.data, '$.finish') = 'error'
+    OR json_extract(m.data, '$.error') IS NOT NULL
+    OR (
+      coalesce(json_extract(m.data, '$.tokens.total'), 0) = 0
+      AND json_extract(m.data, '$.finish') IS NULL
+      AND json_extract(m.data, '$.error') IS NULL
+      AND json_extract(m.data, '$.time.completed') IS NOT NULL
+    )
+  THEN 1 ELSE 0 END) as failed
 FROM message m
 WHERE ${baseWhere}
 GROUP BY provider, model

@@ -10,7 +10,7 @@
  */
 
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, existsSync, mkdirSync } from "node:fs"
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -22,7 +22,7 @@ process.env.USERPROFILE = testHome
 // 导入编译后的真实产物
 const tuiModule = (await import("../dist/tui.js")).default
 const serverModule = (await import("../dist/server.js")).default
-const { readPersistedStats, createPerfTracker } = await import("../dist/server.js")
+const { readPersistedStats, createPerfTracker, getWindowPerfStats } = await import("../dist/server.js")
 
 console.log("=== 开始执行审查修复全量防回归验证套件 ===")
 
@@ -218,7 +218,42 @@ function createMockV1Api() {
   const s1Msgs = storageMap.get("tokenwatch-msgs-session-1") || []
   assert.ok(s1Msgs.some((m) => m.id === "late-m1"), "Session 1 自身的迟到消息必须安全落盘自身 KV")
 
-  console.log("PASS P0-2: 跨会话消息污染彻底阻断，各会话缓存严格隔离！")
+  // 验证跨会话性能统计隔离：切换到 session-2 后，迟到的 session-1 事件不污染前台内存 stats
+  const tracker = createPerfTracker({ persistLog: false })
+  await tracker.loadSession("session-2")
+  tracker.handleMessageUpdated({
+    properties: {
+      info: {
+        id: "late-s1-msg",
+        sessionID: "session-1",
+        role: "assistant",
+        providerID: "p-late",
+        modelID: "m-late",
+        tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+        cost: 0.001,
+        time: { created: 1000, streamed: 2000, completed: 2100 },
+      },
+    },
+  })
+  tracker.handleMessageUpdated({
+    properties: {
+      info: {
+        id: "missing-session-id-msg",
+        sessionID: "",
+        role: "assistant",
+        providerID: "p-current",
+        modelID: "m-current",
+        tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+        cost: 0.001,
+        time: { created: 3000, streamed: 4000, completed: 4100 },
+      },
+    },
+  })
+  const s2Stats = tracker.getSessionStats()
+  assert.equal(s2Stats.models["p-late/m-late"], undefined, "前台会话 session-2 绝不混入 session-1 的迟到性能统计")
+  assert.equal(s2Stats.models["p-current/m-current"]?.requestCount, 1, "缺失 sessionID 的事件必须按当前前台会话兜底，不得丢失性能样本")
+
+  console.log("PASS P0-2: 跨会话消息污染彻底阻断，各会话缓存与内存性能严格隔离！")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -270,6 +305,38 @@ function createMockV1Api() {
         },
         cost: 0.005,
         time: { created: Date.now() - 400 },
+      }] : []),
+      // 无 tokens 对象的真实失败消息（网络/鉴权直接中断）
+      ...(i === 2 ? [{
+        id: "m-err-without-tokens",
+        type: "assistant",
+        finish: "error",
+        error: { message: "Connection refused" },
+        model: { providerID: "test-prov", id: "model-2" },
+        time: { created: Date.now() - 350 },
+      }] : []),
+      // 正常空响应不是失败；进行中消息不参与成功/失败统计
+      ...(i === 2 ? [
+        {
+          id: "m-empty-stop",
+          type: "assistant",
+          finish: "stop",
+          model: { providerID: "test-prov", id: "model-2" },
+          time: { created: Date.now() - 340, completed: Date.now() - 330 },
+        },
+        {
+          id: "m-in-progress",
+          type: "assistant",
+          model: { providerID: "test-prov", id: "model-2" },
+          time: { created: Date.now() - 320 },
+        },
+      ] : []),
+      // 缺少错误状态的历史完成消息保留零 Token 失败兜底
+      ...(i === 2 ? [{
+        id: "m-zero-token-completed-fallback",
+        type: "assistant",
+        model: { providerID: "test-prov", id: "model-2" },
+        time: { created: Date.now() - 310, completed: Date.now() - 300 },
       }] : []),
     ]
   }
@@ -351,8 +418,14 @@ function createMockV1Api() {
 
   const htmlContent = readFileSync(htmlPath, "utf-8")
 
-  // 验证 P0-3: 失败请求被统计（1 个失败），且非零 Token 完整保留在总量中
-  assert.ok(htmlContent.includes("Failed Requests") || htmlContent.includes("Error Rate"), "HTML 必须包含错误率区块")
+  // 精确验证失败边界：2 个显式 error + 1 个完成态零 Token 兜底；
+  // 18 个正常请求 + 1 个正常空响应计成功，进行中消息完全不计入。
+  const reportMatch = htmlContent.match(/<script id="report-data" type="application\/json">([\s\S]*?)<\/script>/)
+  assert.ok(reportMatch, "HTML 必须内嵌 report-data JSON")
+  const reportData = JSON.parse(reportMatch[1])
+  assert.equal(reportData.errors.failedCount, 3, "失败数必须只包含显式错误与完成态零 Token 兜底")
+  assert.equal(reportData.errors.successCount, 19, "正常空响应不得计失败，进行中消息不得计成功")
+  assert.equal(reportData.summary.requestCount, 19, "18 个正常非零请求 + 1 个非零 Token error 必须全部保留用量")
 
   // 验证 P1-9: 18 个模型全部展示在图表中，没有 Top 15 截断！
   for (let i = 1; i <= 18; i++) {
@@ -407,4 +480,18 @@ function createMockV1Api() {
   console.log("PASS P1-8: 缺 delta 时 TTFT 诚实为 null，杜绝伪造 0ms！")
 }
 
-console.log("\n🎉 ALL AUDIT FIXES VERIFICATION PASSED SUCCESSFULLY! 100% COVERAGE 🎉")
+// ─────────────────────────────────────────────────────────────
+// 5. 验证：无日志文件时带过滤条件的查询严禁回退全量持久化统计
+// ─────────────────────────────────────────────────────────────
+{
+  // 真正删除当前隔离 HOME 中的日志，覆盖 files.length === 0 分支
+  const logPath = join(testHome, ".opencode", "tokenwatch.jsonl")
+  rmSync(logPath, { force: true })
+  rmSync(logPath + ".1", { force: true })
+  assert.ok(!existsSync(logPath) && !existsSync(logPath + ".1"), "测试前置条件：日志文件必须不存在")
+  const res = getWindowPerfStats({ sessionId: "non-existent-session" }, new Set(["anthropic/claude-3-7-sonnet"]))
+  assert.equal(res.length, 0, "无日志重放时带窗口过滤严禁回退全量持久化统计（必须返回空数组）")
+  console.log("PASS Issue-1: 无日志文件时窗口过滤保护生效，绝不回退全量历史！")
+}
+
+console.log("\n🎉 ALL AUDIT FIXES VERIFICATION PASSED SUCCESSFULLY! 🎉")

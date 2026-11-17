@@ -362,6 +362,11 @@ const tokenTotal = (msg) =>
 | 🟡 P2 | `sidebar.tsx` | 侧边栏模型性能匹配单方 unknown 跨 provider | **已修复（强化严格 Provider 隔离）** |
 | 🟡 P2 | `sidebar.tsx` | Token 分布估算超 input 未比例收缩 | **已修复（比例收缩并设 other 兜底，总和严格对齐）** |
 | 🟡 P2 | `runtime.tsx` / `perf.ts` | MRU 淘汰 off-by-one 与日志 ts 时间戳 | **已修复（精确差异淘汰，ts 取请求 created）** |
+| 🟠 P1 | `perf.ts` | 无日志文件时，过滤查询回退到全量历史统计 | **已修复（带窗口过滤时无日志诚实返回空数组，杜绝历史回退）** |
+| 🟠 P1 | `runtime.tsx` / `perf.ts` | 迟到事件导致跨会话前台性能污染 | **已修复（activeSessionID 前台内存绑定与 UI 重绘隔离）** |
+| 🟠 P1 | `v2/data-source.ts` | v2 漏计无 tokens 字段的真实失败请求 | **已修复（移除 tokens 前置拦截，正常统计 finish=error）** |
+| 🟠 P1 | `v1/v2 data-source.ts` | 零 Token 的正常空响应/进行中消息误计失败 | **已修复（零 Token 兜底仅限无错误状态的已完成消息）** |
+| 🟡 P2 | `perf.ts` | 缺失 sessionID 的性能事件被前台会话守卫丢弃 | **已修复（归入当前前台会话，与 Token 归属一致）** |
 
 ---
 

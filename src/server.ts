@@ -259,6 +259,6 @@ const plugin: PluginModule & {
 }
 
 export { isServerActive } from "./kernel/server-state.js"
-export { createPerfTracker } from "./kernel/perf.js"
+export { createPerfTracker, getWindowPerfStats } from "./kernel/perf.js"
 export { readPersistedStats } from "./kernel/store.js"
 export default plugin

@@ -267,13 +267,15 @@ export function startTokenWatch(host: HostAdapter): () => void {
   const unsubscribe = host.subscribe({
     onMessageUpdated(event) {
       perfTracker.handleMessageUpdated(toPerfMessageEvent(event))
-      setPerfRevision((v) => v + 1)
+      const targetSessionID = event.sessionID || currentSessionID
+      if (targetSessionID === currentSessionID) {
+        setPerfRevision((v) => v + 1)
+      }
 
       // 聚合当前 TUI 内存模型（与 rebuildFromMessages 同一套过滤规则）。
       // 严格会话边界守卫：非当前前台会话事件绝对不混入当前 allTokenMessages 信号，
       // 避免跨会话污染与相互覆盖；非当前会话安全更新其自身的持久化缓存。
       if (event.role === "assistant" && event.total > 0) {
-        const targetSessionID = event.sessionID || currentSessionID
         const msg: TokenMessage = {
           id: event.messageID,
           sessionID: targetSessionID,
@@ -295,6 +297,7 @@ export function startTokenWatch(host: HostAdapter): () => void {
             : [...prev, msg]
           setAllTokenMessages(next)
           persistThrottled(currentSessionID, next)
+          setSidebarRevision((v) => v + 1)
         } else if (targetSessionID) {
           // 迟到或后台会话事件：不污染当前前台信号，安全独立落盘目标会话
           try {
@@ -309,8 +312,6 @@ export function startTokenWatch(host: HostAdapter): () => void {
           } catch { /* non-critical */ }
         }
       }
-
-      setSidebarRevision((v) => v + 1)
     },
 
     onPartUpdated(event) {
