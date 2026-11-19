@@ -1,7 +1,7 @@
 # opencode-tokenwatch — Agent Context Document
 
 > 本文档供 AI 编程助手（opencode CLI、Antigravity CLI 等）快速了解项目全貌。
-> 最后更新：2026-11-13（v0.7.2）
+> 最后更新：2026-11-19（v0.7.2）
 
 ---
 

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.2] - 2026-11-13
+## [0.7.2] - 2026-11-19
 
 ### Fixed
 - **kernel/perf & kernel/store**: 消除 Server 与 TUI 双进程重复落盘缺陷（P0-1）。引入 `messageID` 跨进程幂等去重，追加写入 `tokenwatch.jsonl` 前进行快速尾部扫描去重，持久化统计 `tokenwatch-stats.json` 维护滑动窗口拦截重复消息，彻底杜绝请求数、Token 与样本翻倍。
